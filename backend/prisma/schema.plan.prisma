@@ -1,0 +1,709 @@
+// Prisma schema — PLANEACIÓN (auth + módulos originales de rutas_web).
+// Refleja 1:1 el esquema Postgres de legacy_fastapi/db/schema.sql +
+// schema_business.sql (vía @@map/@map) — apunta a la BD propia de rutas_web
+// (DATABASE_URL_PLAN), separada de la BD de Ejecución (DISTRILOG).
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/plan"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL_PLAN")
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// AUTENTICACIÓN Y PERMISOS (de rutas_web — sesión por cookie, NO JWT)
+// ════════════════════════════════════════════════════════════════════════
+
+model Rol {
+  id                Int     @id @default(autoincrement())
+  nombre            String  @unique @db.VarChar(50)
+  descripcion       String? @default("") @db.VarChar(200)
+  activo            Boolean @default(true)
+  areaProgramacion  String? @map("area_programacion") @db.VarChar(50)
+
+  usuarios    Usuario[]
+  rolPermisos RolPermiso[]
+
+  @@map("roles")
+}
+
+model Permiso {
+  id          Int     @id @default(autoincrement())
+  clave       String  @unique @db.VarChar(60)
+  descripcion String? @default("") @db.VarChar(200)
+
+  rolPermisos RolPermiso[]
+
+  @@map("permisos")
+}
+
+model RolPermiso {
+  rolId     Int @map("rol_id")
+  permisoId Int @map("permiso_id")
+
+  rol     Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permisos")
+}
+
+model Usuario {
+  id                 Int       @id @default(autoincrement())
+  username           String    @unique @db.VarChar(50)
+  passwordHash       String    @map("password_hash") @db.VarChar(200)
+  nombreCompleto     String    @map("nombre_completo") @db.VarChar(120)
+  email              String?   @db.VarChar(120)
+  rolId              Int       @map("rol_id")
+  instancia          String?   @default("AMBAS") @db.VarChar(10)
+  canal              String?   @db.VarChar(50)
+  activo             Boolean   @default(true)
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  ultimoLogin        DateTime? @map("ultimo_login")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  createdBy          String?   @default("sistema") @map("created_by") @db.VarChar(50)
+
+  rol       Rol              @relation(fields: [rolId], references: [id])
+  columnas  UsuarioColumna[]
+  loginLogs LoginLog[]
+
+  @@map("usuarios")
+}
+
+model UsuarioColumna {
+  id          Int     @id @default(autoincrement())
+  usuarioId   Int     @map("usuario_id")
+  area        String  @db.VarChar(50)
+  puedeVer    Boolean @default(true) @map("puede_ver")
+  puedeEditar Boolean @default(false) @map("puede_editar")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, area])
+  @@map("usuario_columnas")
+}
+
+model LoginLog {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int?     @map("usuario_id")
+  username  String?  @db.VarChar(50)
+  evento    String?  @db.VarChar(20)
+  ip        String?  @db.VarChar(40)
+  instancia String?  @db.VarChar(10)
+  fecha     DateTime @default(now())
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@map("login_log")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  usuario   String?  @db.VarChar(100)
+  accion    String?  @db.VarChar(50)
+  modulo    String?  @db.VarChar(50)
+  detalle   String?  @db.VarChar(500)
+  instancia String?  @db.VarChar(10)
+  fecha     DateTime @default(now())
+
+  @@map("audit_log")
+}
+
+// Historial de cambios campo a campo (módulo invisible, solo ADMIN).
+model CambioLog {
+  id            Int      @id @default(autoincrement())
+  creadoAt      DateTime @default(now()) @map("creado_at")
+  usuario       String?  @db.VarChar(100)
+  modulo        String?  @db.VarChar(50)
+  contexto      String?  @db.VarChar(250)
+  campo         String?  @db.VarChar(100)
+  valorAnterior String?  @map("valor_anterior")
+  valorNuevo    String?  @map("valor_nuevo")
+
+  @@map("cambios")
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// PLANEACIÓN (módulos originales de rutas_web: maestros, programación,
+// asignación, áreas para cargar, distribución producción, simulador…)
+// ════════════════════════════════════════════════════════════════════════
+
+model PlanConductor {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @db.VarChar(100)
+  documento String?  @db.VarChar(30)
+  celular   String?  @db.VarChar(20)
+  correo    String?  @db.VarChar(150)
+  empleador String?  @db.VarChar(150)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  rutas PlanRuta[]
+
+  @@map("conductores")
+}
+
+model PlanVehiculo {
+  id             Int      @id @default(autoincrement())
+  placa          String   @unique @db.VarChar(20)
+  capacidadKg    Float?   @default(0) @map("capacidad_kg")
+  disponibilidad String?  @default("DISPONIBLE") @db.VarChar(20)
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  rutas PlanRuta[]
+
+  @@map("vehiculos")
+}
+
+model PlanAuxiliar {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @db.VarChar(100)
+  celular   String?  @db.VarChar(20)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  rutaAuxiliares PlanRutaAuxiliar[]
+
+  @@map("auxiliares")
+}
+
+model Destino {
+  id              Int      @id @default(autoincrement())
+  instancia       String   @db.VarChar(10)
+  numero          Int?
+  nombre          String   @db.VarChar(150)
+  canal           String?  @db.VarChar(50)
+  codigo          String?  @db.VarChar(40)
+  nombreComercial String?  @map("nombre_comercial") @db.VarChar(150)
+  direccion       String?  @db.VarChar(200)
+  barrio          String?  @db.VarChar(100)
+  ciudad          String?  @db.VarChar(100)
+  departamento    String?  @db.VarChar(100)
+  pais            String?  @db.VarChar(100)
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  progDetalle     ProgDetalle[]
+  rutaDestinos    PlanRutaDestino[]
+  rutaDocumentos  RutaDocumento[]
+  rutaMaestraDest RutaMaestraDestino[]
+  rutaRemisiones  RutaRemision[]
+  destinoAreas    DestinoArea[]
+  tiendaDestino   TiendaDestino[]
+
+  @@index([instancia, activo])
+  @@map("destinos")
+}
+
+model Programacion {
+  id            Int      @id @default(autoincrement())
+  instancia     String   @db.VarChar(10)
+  fecha         DateTime @db.Date
+  estado        String?  @default("BORRADOR") @db.VarChar(20)
+  usuario       String?  @db.VarChar(50)
+  observaciones String?
+  consecutivo   Int?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @map("updated_at")
+
+  areaEstados AreaEstado[]
+  detalle     ProgDetalle[]
+  rutas       PlanRuta[]
+
+  @@unique([instancia, fecha])
+  @@map("programaciones")
+}
+
+model AreaEstado {
+  progId     Int       @map("prog_id")
+  area       String    @db.VarChar(50)
+  cerrado    Boolean?  @default(false)
+  cerradoPor String?   @map("cerrado_por") @db.VarChar(100)
+  cerradoAt  DateTime? @map("cerrado_at")
+
+  programacion Programacion @relation(fields: [progId], references: [id], onDelete: Cascade)
+
+  @@id([progId, area])
+  @@map("area_estados")
+}
+
+model ProgDetalle {
+  id                        Int     @id @default(autoincrement())
+  progId                    Int     @map("prog_id")
+  destinoId                 Int?    @map("destino_id")
+  // Id del Cliente (base de Ejecución, cuid en otra BD -> sin FK real en Postgres).
+  // Las filas nuevas de Programación usan clienteId; destinoId queda solo para
+  // filas históricas creadas antes de la migración a Clientes.
+  clienteId                 String? @map("cliente_id")
+  klsBovino                 Float? @default(0) @map("kls_bovino")
+  klsVisceraBovino          Float? @default(0) @map("kls_viscera_bovino")
+  canastillasBovino         Int?   @default(0) @map("canastillas_bovino")
+  canastillasVisceraBovino  Int?   @default(0) @map("canastillas_viscera_bovino")
+  klsPorcino                Float? @default(0) @map("kls_porcino")
+  klsVisceraPorcino         Float? @default(0) @map("kls_viscera_porcino")
+  canastillasPorcino        Int?   @default(0) @map("canastillas_porcino")
+  canastillasVisceraPorcino Int?   @default(0) @map("canastillas_viscera_porcino")
+  klsInversion              Float? @default(0) @map("kls_inversion")
+  canastillasInversion      Int?   @default(0) @map("canastillas_inversion")
+  klsTat                    Float? @default(0) @map("kls_tat")
+  canastillasTat            Int?   @default(0) @map("canastillas_tat")
+  klsOtros                  Float? @default(0) @map("kls_otros")
+  canastillasOtros          Int?   @default(0) @map("canastillas_otros")
+
+  programacion Programacion @relation(fields: [progId], references: [id], onDelete: Cascade)
+  destino      Destino?     @relation(fields: [destinoId], references: [id])
+
+  @@unique([progId, destinoId])
+  @@unique([progId, clienteId])
+  @@map("prog_detalle")
+}
+
+model PlanRuta {
+  id          Int       @id @default(autoincrement())
+  progId      Int       @map("prog_id")
+  numeroRuta  Int       @map("numero_ruta")
+  vehiculoId  Int?      @map("vehiculo_id")
+  conductorId Int?      @map("conductor_id")
+  horaCargue  String?   @map("hora_cargue") @db.VarChar(10)
+  pesoTotal   Float?    @default(0) @map("peso_total")
+  cerrada     Boolean?  @default(false)
+  cerradaPor  String?   @map("cerrada_por") @db.VarChar(100)
+  cargada     Boolean?  @default(false)
+  cargadaPor  String?   @map("cargada_por") @db.VarChar(100)
+  cargadaAt   DateTime? @map("cargada_at")
+
+  programacion  Programacion        @relation(fields: [progId], references: [id], onDelete: Cascade)
+  vehiculo      PlanVehiculo?       @relation(fields: [vehiculoId], references: [id])
+  conductor     PlanConductor?      @relation(fields: [conductorId], references: [id])
+  destinos      PlanRutaDestino[]
+  auxiliares    PlanRutaAuxiliar[]
+  documentos    RutaDocumento[]
+  docEstado     RutaDocEstado?
+  remisiones    RutaRemision[]
+  docAreaEstado RutaDocAreaEstado[]
+  areaCarga     RutaAreaCarga[]
+  cumplimiento  RutaCumplimiento?
+
+  @@unique([progId, numeroRuta])
+  @@map("rutas")
+}
+
+model PlanRutaDestino {
+  id        Int     @id @default(autoincrement())
+  rutaId    Int     @map("ruta_id")
+  destinoId Int?    @map("destino_id")
+  // Id del Cliente (Ejecución) para rutas creadas después de la migración a Clientes.
+  clienteId String? @map("cliente_id")
+  orden     Int?    @default(1)
+  kilos     Float?  @default(0)
+
+  ruta    PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  destino Destino? @relation(fields: [destinoId], references: [id])
+
+  @@unique([rutaId, destinoId])
+  @@unique([rutaId, clienteId])
+  @@map("ruta_destinos")
+}
+
+model PlanRutaAuxiliar {
+  id         Int  @id @default(autoincrement())
+  rutaId     Int  @map("ruta_id")
+  auxiliarId Int  @map("auxiliar_id")
+  posicion   Int? @default(1)
+
+  ruta     PlanRuta     @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  auxiliar PlanAuxiliar @relation(fields: [auxiliarId], references: [id])
+
+  @@unique([rutaId, auxiliarId])
+  @@map("ruta_auxiliares")
+}
+
+model RutaDocumento {
+  id             Int      @id @default(autoincrement())
+  rutaId         Int      @map("ruta_id")
+  destinoId      Int      @map("destino_id")
+  area           String   @db.VarChar(50)
+  numDocto       String?  @map("num_docto") @db.VarChar(50)
+  verificado     Boolean? @default(false)
+  novedad        String?
+  cantRemisiones Int?     @map("cant_remisiones")
+
+  ruta    PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  destino Destino  @relation(fields: [destinoId], references: [id])
+
+  @@map("ruta_documentos")
+}
+
+model RutaDocEstado {
+  rutaId     Int       @id @map("ruta_id")
+  cerrado    Boolean?  @default(false)
+  cerradoPor String?   @map("cerrado_por") @db.VarChar(100)
+  cerradoAt  DateTime? @map("cerrado_at")
+
+  ruta PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@map("ruta_doc_estado")
+}
+
+model RutaMaestra {
+  id                  Int      @id @default(autoincrement())
+  nombre              String   @unique @db.VarChar(100)
+  grupo               String?  @db.VarChar(80)
+  ciudad              String?  @db.VarChar(150)
+  recorrido           String?  @db.VarChar(250)
+  km                  Float?   @default(0)
+  tiempoEstimadoMin   Int?     @map("tiempo_estimado_min")
+  tiempoEstimadoTexto String?  @map("tiempo_estimado_texto") @db.VarChar(30)
+  activo              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @map("updated_at")
+
+  destinos RutaMaestraDestino[]
+
+  @@index([grupo, activo])
+  @@map("ruta_maestra")
+}
+
+model RutaMaestraDestino {
+  id            Int @id @default(autoincrement())
+  rutaMaestraId Int @map("ruta_maestra_id")
+  destinoId     Int @map("destino_id")
+  orden         Int @default(1)
+
+  rutaMaestra RutaMaestra @relation(fields: [rutaMaestraId], references: [id], onDelete: Cascade)
+  destino     Destino     @relation(fields: [destinoId], references: [id])
+
+  @@unique([rutaMaestraId, destinoId])
+  @@unique([rutaMaestraId, orden])
+  @@index([destinoId])
+  @@map("ruta_maestra_destino")
+}
+
+model RutaRemision {
+  id              Int      @id @default(autoincrement())
+  rutaId          Int      @map("ruta_id")
+  destinoId       Int      @map("destino_id")
+  numero          String?  @db.VarChar(50)
+  observacion     String?
+  area            String?  @db.VarChar(50)
+  kg              Float?
+  cumplVerificada Boolean? @default(false) @map("cumpl_verificada")
+  cumplNovedad    String?  @map("cumpl_novedad")
+
+  ruta    PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+  destino Destino  @relation(fields: [destinoId], references: [id])
+
+  @@index([rutaId])
+  @@index([rutaId, area])
+  @@map("ruta_remisiones")
+}
+
+model RutaDocAreaEstado {
+  rutaId     Int       @map("ruta_id")
+  area       String    @db.VarChar(50)
+  cerrado    Boolean?  @default(false)
+  cerradoPor String?   @map("cerrado_por") @db.VarChar(100)
+  cerradoAt  DateTime? @map("cerrado_at")
+
+  ruta PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@id([rutaId, area])
+  @@map("ruta_doc_area_estado")
+}
+
+model RutaAreaCarga {
+  rutaId         Int       @map("ruta_id")
+  area           String    @db.VarChar(50)
+  estado         String    @default("PENDIENTE") @db.VarChar(20)
+  actualizadoPor String?   @map("actualizado_por") @db.VarChar(100)
+  actualizadoAt  DateTime? @map("actualizado_at")
+
+  ruta PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@id([rutaId, area])
+  @@map("ruta_area_carga")
+}
+
+// Legado — retirado de la UI pero conservado por compatibilidad de datos.
+model RutaCumplimiento {
+  rutaId        Int       @id @map("ruta_id")
+  estado        String?   @default("PENDIENTE") @db.VarChar(20)
+  novedad       String?
+  verificado    Boolean?  @default(false)
+  verificadoPor String?   @map("verificado_por") @db.VarChar(100)
+  verificadoAt  DateTime? @map("verificado_at")
+
+  ruta PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@map("ruta_cumplimiento")
+}
+
+model DestinoArea {
+  destinoId Int    @map("destino_id")
+  area      String @db.VarChar(30)
+
+  destino Destino @relation(fields: [destinoId], references: [id], onDelete: Cascade)
+
+  @@id([destinoId, area])
+  @@index([area])
+  @@map("destino_areas")
+}
+
+model TiendaDestino {
+  id        Int      @id @default(autoincrement())
+  area      String   @db.VarChar(30)
+  tiendaKey String   @map("tienda_key") @db.VarChar(160)
+  dep       String?  @db.VarChar(20)
+  destinoId Int      @map("destino_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  destino Destino @relation(fields: [destinoId], references: [id], onDelete: Cascade)
+
+  @@unique([area, tiendaKey])
+  @@index([area])
+  @@map("tienda_destino")
+}
+
+model DistProduccion {
+  id               Int      @id @default(autoincrement())
+  fecha            DateTime @default(now()) @db.Date
+  nit              String?  @db.VarChar(20)
+  ordenArchivo     String?  @map("orden_archivo") @db.VarChar(200)
+  plantaArchivo    String?  @map("planta_archivo") @db.VarChar(200)
+  totalPedido      Float?   @map("total_pedido")
+  totalPlanta      Float?   @map("total_planta")
+  totalDistribuido Float?   @map("total_distribuido")
+  totalExcedente   Float?   @map("total_excedente")
+  totalFaltante    Float?   @map("total_faltante")
+  usuario          String?  @db.VarChar(60)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  detalle DistProduccionDetalle[]
+
+  @@map("dist_produccion")
+}
+
+model DistProduccionDetalle {
+  id          Int      @id @default(autoincrement())
+  distId      Int      @map("dist_id")
+  dep         String?  @db.VarChar(20)
+  tienda      String?  @db.VarChar(150)
+  enOrden     Boolean? @default(false) @map("en_orden")
+  plu         String?  @db.VarChar(30)
+  producto    String?  @db.VarChar(180)
+  pedido      Float?   @default(0)
+  planta      Float?   @default(0)
+  distribuido Float?   @default(0)
+
+  dist DistProduccion @relation(fields: [distId], references: [id], onDelete: Cascade)
+
+  @@index([distId])
+  @@map("dist_produccion_detalle")
+}
+
+model PredistConsolidado {
+  id         Int      @id @default(autoincrement())
+  ffin       String?  @db.VarChar(20)
+  archivo    String?  @db.VarChar(200)
+  usuario    String?  @db.VarChar(60)
+  nProductos Int?     @default(0) @map("n_productos")
+  nTiendas   Int?     @default(0) @map("n_tiendas")
+  granTotal  Int?     @default(0) @map("gran_total")
+  tipo       String?  @db.VarChar(10)
+  grupo      String?  @db.VarChar(40)
+  datos      Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("predist_consolidado")
+}
+
+model PredistSiesa {
+  plu    String  @id @db.VarChar(30)
+  siesa  String  @db.VarChar(20)
+  nombre String? @db.VarChar(180)
+
+  @@map("predist_siesa")
+}
+
+model SimPerfil {
+  id            Int      @id @default(autoincrement())
+  nombre        String   @db.VarChar(120)
+  vigenteDesde  DateTime @default(now()) @map("vigente_desde") @db.Date
+  origenArchivo String?  @map("origen_archivo") @db.VarChar(200)
+  notas         String?
+  activo        Boolean  @default(true)
+  usuario       String?  @db.VarChar(60)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  productos SimPerfilProducto[]
+  tiendas   SimPerfilTienda[]
+  surtido   SimPerfilSurtido[]
+  corridas  SimCorrida[]
+
+  @@index([vigenteDesde])
+  @@map("sim_perfil")
+}
+
+model SimPerfilProducto {
+  id           Int     @id @default(autoincrement())
+  perfilId     Int     @map("perfil_id")
+  plu          String  @db.VarChar(30)
+  siesa        String? @db.VarChar(30)
+  nombrePlanta String? @map("nombre_planta") @db.VarChar(180)
+  nombreExito  String? @map("nombre_exito") @db.VarChar(180)
+  unidad       String  @default("KG") @db.VarChar(4)
+  kgRes        Float   @default(0) @map("kg_res")
+  precio       Float   @default(0)
+  orden        Int?    @default(0)
+
+  perfil SimPerfil @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+
+  @@unique([perfilId, plu])
+  @@index([perfilId])
+  @@map("sim_perfil_producto")
+}
+
+model SimPerfilTienda {
+  id       Int     @id @default(autoincrement())
+  perfilId Int     @map("perfil_id")
+  dep      String  @db.VarChar(20)
+  nombre   String? @db.VarChar(150)
+  orden    Int?    @default(0)
+
+  perfil SimPerfil @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+
+  @@unique([perfilId, dep])
+  @@index([perfilId])
+  @@map("sim_perfil_tienda")
+}
+
+model SimPerfilSurtido {
+  perfilId Int    @map("perfil_id")
+  plu      String @db.VarChar(30)
+  dep      String @db.VarChar(20)
+
+  perfil SimPerfil @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+
+  @@id([perfilId, plu, dep])
+  @@map("sim_perfil_surtido")
+}
+
+model SimCorrida {
+  id         Int      @id @default(autoincrement())
+  perfilId   Int?     @map("perfil_id")
+  fecha      DateTime @default(now()) @db.Date
+  titulo     String?  @db.VarChar(160)
+  numero     Int?
+  totalReses Int?     @default(0) @map("total_reses")
+  totalKg    Float?   @default(0) @map("total_kg")
+  totalUnd   Float?   @default(0) @map("total_und")
+  totalValor Float?   @default(0) @map("total_valor")
+  usuario    String?  @db.VarChar(60)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  perfil  SimPerfil?          @relation(fields: [perfilId], references: [id])
+  detalle SimCorridaDetalle[]
+
+  @@index([fecha])
+  @@map("sim_corrida")
+}
+
+model SimCorridaDetalle {
+  id        Int     @id @default(autoincrement())
+  corridaId Int     @map("corrida_id")
+  dep       String? @db.VarChar(20)
+  tienda    String? @db.VarChar(150)
+  plu       String? @db.VarChar(30)
+  producto  String? @db.VarChar(180)
+  unidad    String? @default("KG") @db.VarChar(4)
+  reses     Int?    @default(0)
+  cantidad  Float?  @default(0)
+  valor     Float?  @default(0)
+
+  corrida SimCorrida @relation(fields: [corridaId], references: [id], onDelete: Cascade)
+
+  @@index([corridaId])
+  @@map("sim_corrida_detalle")
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ERRANDS — puerto de SIGLOG-ANTIGUO/boletas-app/run-errands (pedidos
+// ad-hoc de un Punto de Venta hacia un Destino/Cliente propios, exportables
+// a Excel formato Free_Order). Tablas propias, independientes del maestro
+// Destino/Cliente de Planeación/Ejecución.
+// ════════════════════════════════════════════════════════════════════════
+
+model ErrandsPuntoVenta {
+  id        Int      @id @default(autoincrement())
+  indicador Int      @unique
+  nombre    String   @db.VarChar(150)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pedidos       ErrandsPedido[]
+  domiciliarios ErrandsDomiciliario[]
+
+  @@map("errands_puntos_venta")
+}
+
+model ErrandsDomiciliario {
+  id           Int      @id @default(autoincrement())
+  nombre       String   @db.VarChar(150)
+  telefono     String?  @db.VarChar(30)
+  cedula       String?  @db.VarChar(30)
+  email        String?  @db.VarChar(120)
+  puntoVentaId Int?     @map("punto_venta_id")
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  puntoVenta ErrandsPuntoVenta? @relation(fields: [puntoVentaId], references: [id])
+  pedidos    ErrandsPedido[]
+
+  @@index([puntoVentaId])
+  @@map("errands_domiciliarios")
+}
+
+model ErrandsCliente {
+  id            Int      @id @default(autoincrement())
+  codigo        String   @unique @db.VarChar(40)
+  nombre        String   @db.VarChar(150)
+  direccion     String?  @db.VarChar(200)
+  referencia    String?  @db.VarChar(150)
+  barrio        String?  @db.VarChar(100)
+  ciudad        String?  @db.VarChar(100)
+  region        String?  @db.VarChar(100)
+  telefono      String?  @db.VarChar(30)
+  email         String?  @db.VarChar(120)
+  observaciones String?
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  pedidos ErrandsPedido[]
+
+  @@map("errands_clientes")
+}
+
+model ErrandsPedido {
+  id              Int      @id @default(autoincrement())
+  numeroPedido    String   @unique @map("numero_pedido") @db.VarChar(30)
+  clienteId       Int      @map("cliente_id")
+  puntoVentaId    Int?     @map("punto_venta_id")
+  domiciliarioId  Int?     @map("domiciliario_id")
+  kilos           Float    @default(1)
+  estado          String   @default("REVISADO") @db.VarChar(20)
+  observaciones   String?
+  fecha           DateTime @default(now())
+  usuario         String?  @db.VarChar(60)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  cliente      ErrandsCliente       @relation(fields: [clienteId], references: [id])
+  puntoVenta   ErrandsPuntoVenta?   @relation(fields: [puntoVentaId], references: [id])
+  domiciliario ErrandsDomiciliario? @relation(fields: [domiciliarioId], references: [id])
+
+  @@index([fecha])
+  @@index([clienteId])
+  @@map("errands_pedidos")
+}

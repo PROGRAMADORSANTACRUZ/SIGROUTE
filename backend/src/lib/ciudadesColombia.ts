@@ -1,0 +1,190 @@
+// Lista de municipios reales de Colombia — copiado de
+// frontend/src/data/colombia.ts (MUNICIPIOS_POR_DEPARTAMENTO) para poder
+// validar en el backend si un valor es una CIUDAD real o en realidad un
+// barrio/comuna (los TAT a veces traen el barrio metido en el campo "Ciudad").
+const CIUDADES_RAW: string[] = [
+  // Atlántico
+  "Barranquilla", "Soledad", "Malambo", "Sabanalarga", "Baranoa", "Puerto Colombia",
+  "Galapa", "Sabanagrande", "Santo Tomás", "Palmar de Varela", "Ponedera", "Polonuevo",
+  "Usiacurí", "Juan de Acosta", "Tubará", "Piojó", "Luruaco", "Repelón", "Manatí",
+  "Candelaria", "Campo de la Cruz", "Santa Lucía", "Suan",
+  // Bolívar
+  "Cartagena", "Magangué", "Turbaco", "Arjona", "El Carmen de Bolívar", "Mompós",
+  "Santa Rosa", "Turbaná", "San Juan Nepomuceno", "María la Baja", "San Jacinto",
+  "Mahates", "Villanueva", "Santa Catalina", "Clemencia", "Santa Rosa del Sur",
+  "Simití", "San Pablo", "Morales", "Arenal", "Achí", "San Martín de Loba",
+  "Barranco de Loba", "Altos del Rosario", "Regidor", "Río Viejo", "Tiquisio",
+  "Montecristo", "Pinillos", "Talaigua Nuevo", "Cicuco", "San Fernando",
+  "Margarita", "Hatillo de Loba", "El Peñón", "Norosí", "Cantagallo", "Calamar",
+  "El Guamo", "Zambrano", "Córdoba", "San Estanislao", "Soplaviento", "Arroyohondo",
+  // Córdoba
+  "Montería", "Cereté", "Lorica", "Sahagún", "Planeta Rica", "Montelíbano", "Tierralta",
+  "Ciénaga de Oro", "Chinú", "San Andrés de Sotavento", "San Pelayo", "Puerto Libertador",
+  "Ayapel", "Pueblo Nuevo", "San Antero", "Los Córdobas", "Canalete", "Moñitos",
+  "San Bernardo del Viento", "Purísima", "Momil", "Chimá", "Cotorra", "Valencia",
+  "Tuchín", "La Apartada", "Buenavista", "San Carlos", "San José de Uré", "Puerto Escondido",
+  // Sucre
+  "Sincelejo", "Corozal", "Sampués", "San Marcos", "Santiago de Tolú", "Sincé",
+  "San Onofre", "Majagual", "Coveñas", "Ovejas", "Los Palmitos", "Morroa", "San Benito Abad",
+  "Galeras", "San Pedro", "Sucre", "Caimito", "La Unión", "El Roble",
+  "Guaranda", "San Juan de Betulia", "Chalán", "Colosó", "Palmito", "Tolú Viejo",
+  // Magdalena
+  "Santa Marta", "Ciénaga", "Fundación", "El Banco", "Plato", "Aracataca", "Zona Bananera",
+  "Pivijay", "El Retén", "Algarrobo", "Ariguaní", "Sabanas de San Ángel",
+  "Nueva Granada", "Pedraza", "Chivolo", "Tenerife", "Guamal", "San Sebastián de Buenavista",
+  "Santa Ana", "Pijiño del Carmen", "San Zenón", "Santa Bárbara de Pinto", "Cerro de San Antonio",
+  "Concordia", "Pueblo Viejo", "Sitionuevo", "Remolino", "Salamina", "El Piñón", "Zapayán",
+  // Cesar
+  "Valledupar", "Aguachica", "Bosconia", "Agustín Codazzi", "La Jagua de Ibirico",
+  "Chiriguaná", "El Copey", "Curumaní", "San Alberto", "San Martín", "Pailitas", "Becerril",
+  "La Paz", "Manaure Balcón del Cesar", "Pelaya", "Astrea", "El Paso", "Gamarra", "González",
+  "Río de Oro", "La Gloria", "Tamalameque", "Pueblo Bello", "San Diego",
+  // La Guajira
+  "Riohacha", "Maicao", "Uribia", "Manaure", "Fonseca", "San Juan del Cesar", "Villanueva",
+  "Barrancas", "Dibulla", "Hatonuevo", "Albania", "El Molino", "Distracción", "La Jagua del Pilar",
+  "Urumita",
+  // Bogotá / Cundinamarca
+  "Bogotá", "Soacha", "Facatativá", "Zipaquirá", "Chía", "Girardot", "Fusagasugá", "Mosquera",
+  "Madrid", "Funza", "Cajicá", "Sibaté", "Tocancipá", "Cota", "La Calera", "Ubaté",
+  "Villeta", "Cáqueza", "Choachí", "Tenjo", "Tabio", "Sopó", "Gachetá", "Guaduas",
+  "La Mesa", "Anapoima", "Ricaurte", "Pacho", "Nemocón", "Sesquilé", "Gachancipá",
+  "Sasaima", "Silvania", "Tocaima", "Villapinzón", "Chocontá", "Zipacón", "El Rosal",
+  "Bojacá", "Subachoque", "Suesca", "Guasca", "Fómeque", "Une", "Gutiérrez", "Agua de Dios",
+  "Nilo", "Viotá", "El Colegio", "San Antonio del Tequendama", "Cachipay", "Apulo",
+  "Nariño", "Jerusalén", "Fúquene", "Lenguazaque", "Guachetá", "Simijaca", "Tausa",
+  // Antioquia
+  "Medellín", "Bello", "Itagüí", "Envigado", "Apartadó", "Turbo", "Rionegro", "Sabaneta",
+  "Copacabana", "La Estrella", "Caucasia", "Girardota", "Barbosa", "Marinilla", "Carepa",
+  "El Bagre", "Chigorodó", "Necoclí", "Yarumal", "Santa Rosa de Osos", "Sonsón", "Puerto Berrío",
+  "Caldas", "La Ceja", "Guarne", "El Carmen de Viboral", "Segovia", "Amagá", "Andes",
+  "Santa Fe de Antioquia", "Támesis", "Jericó", "Jardín", "Ciudad Bolívar", "Urrao",
+  "Frontino", "Dabeiba", "Cañasgordas", "Sopetrán", "San Jerónimo", "El Peñol", "Guatapé",
+  "San Rafael", "San Carlos", "Cocorná", "Granada", "El Santuario", "Abejorral",
+  "Yolombó", "Cisneros", "Santo Domingo", "Remedios", "Zaragoza", "Nechí", "Tarazá",
+  "Valdivia", "Ituango", "Don Matías", "Entrerríos", "San Pedro de los Milagros",
+  "Puerto Triunfo", "Puerto Nare", "Maceo", "Titiribí", "Fredonia", "Venecia",
+  // Valle del Cauca
+  "Cali", "Palmira", "Buenaventura", "Tuluá", "Cartago", "Buga", "Jamundí", "Yumbo",
+  "Florida", "Pradera", "Zarzal", "Sevilla", "Roldanillo",
+  "Caicedonia", "El Cerrito", "Guacarí", "Ginebra", "Dagua", "Andalucía", "Bugalagrande",
+  "Restrepo", "Vijes", "Yotoco", "La Cumbre", "Calima", "Riofrío", "Trujillo", "Bolívar",
+  "El Dovio", "Versalles", "El Águila", "El Cairo", "Argelia", "Toro", "Ansermanuevo",
+  "Alcalá", "Ulloa", "Obando", "La Victoria",
+  // Santander
+  "Bucaramanga", "Floridablanca", "Girón", "Piedecuesta", "Barrancabermeja", "San Gil",
+  "Socorro", "Málaga", "Vélez", "Lebrija", "Sabana de Torres",
+  "Puerto Wilches", "Cimitarra", "Zapatoca", "Charalá", "Oiba", "El Playón", "San Vicente de Chucurí",
+  "El Carmen de Chucurí", "Curití", "Aratoca", "Los Santos", "Mogotes", "Onzaga", "San Joaquín",
+  "Barichara", "Puente Nacional", "Guavatá",
+  "Contratación", "Simacota", "Concepción", "Cerrito", "California", "Matanza", "Suratá",
+  "Tona", "Los Patios", "Aguada", "Guaca",
+  // Norte de Santander
+  "Cúcuta", "Villa del Rosario", "Ocaña", "Pamplona", "Tibú", "El Zulia",
+  "Chinácota", "Sardinata", "Ábrego", "Puerto Santander", "El Tarra", "Convención",
+  "San Cayetano", "El Carmen", "Teorama", "Hacarí", "La Playa", "San Calixto", "Bochalema",
+  "Pamplonita", "Cácota", "Chitagá", "Toledo", "Labateca", "Ragonvalia", "Herrán", "Durania",
+  "Salazar", "Arboledas", "Cucutilla", "Gramalote", "Lourdes", "Villa Caro", "Bucarasica",
+  "Mutiscua", "Silos", "Cachirá", "La Esperanza",
+  // Nariño
+  "Pasto", "Ipiales", "Tumaco", "Túquerres", "Samaniego", "Sandoná",
+  "Barbacoas", "El Charco", "Cumbal", "Pupiales", "Guachucal", "La Cruz", "Buesaco",
+  "Tangua", "Yacuanquer", "Consacá", "Ancuya", "Linares", "El Tambo", "Chachagüí",
+  "La Florida", "Ospina", "Imués", "Iles", "Contadero", "Aldana", "Córdoba",
+  "Potosí", "Puerres", "Funes", "Ricaurte", "Mallama", "Providencia", "Sapuyes",
+  "Guaitarilla", "Taminango", "San Lorenzo", "Arboleda", "San Pablo", "Belén",
+  "Colón", "La Llanada", "Los Andes", "Cumbitara", "El Rosario", "Leiva", "Policarpa",
+  "Magüí", "Roberto Payán", "Olaya Herrera", "Mosquera", "La Tola", "Santa Bárbara",
+  // Huila
+  "Neiva", "Pitalito", "Garzón", "La Plata", "Campoalegre", "Gigante", "Palermo", "Aipe",
+  "Rivera", "San Agustín", "Timaná", "Acevedo", "Algeciras", "Isnos", "Tello",
+  // Boyacá
+  "Tunja", "Duitama", "Sogamoso", "Chiquinquirá", "Paipa", "Puerto Boyacá", "Villa de Leyva",
+  "Moniquirá", "Nobsa", "Samacá", "Tibasosa", "Garagoa", "Ramiriquí", "Soatá", "Guateque",
+  "Aquitania", "Tibaná", "Ventaquemada", "Combita", "Motavita", "Oicatá", "Sora", "Cucaita",
+  "Sotaquirá", "Toca", "Siachoque", "Turmequé", "Nuevo Colón", "Jenesano", "Boyacá",
+  "Cerinza", "Santa Rosa de Viterbo", "Floresta", "Busbanzá", "Corrales", "Gañeza",
+  "Firavitoba", "Iza", "Cuítiva", "Tota", "Monguí", "Mongua", "Sativanorte", "Susacón",
+  "Tipacoque", "Covarachía", "Chita", "Socha", "Socotá", "Tasco", "Paz de Río",
+  "Betéitiva", "Miraflores", "Chinavita", "Pachavita", "Macanal", "Campohermoso", "Guayatá",
+  "Tenza", "La Capilla", "Sutatenza", "Somondoco", "Almeida", "Chivor", "Ciénega",
+  // Meta
+  "Villavicencio", "Acacías", "Puerto López", "Cumaral",
+  "Puerto Gaitán", "Castilla la Nueva", "San Carlos de Guaroa",
+  "Fuente de Oro", "El Castillo", "El Dorado", "Cubarral", "Lejanías", "El Calvario",
+  "San Juanito", "Barranca de Upía", "Cabuyaro", "San Juan de Arama", "Vistahermosa",
+  "Mesetas", "Uribe", "La Macarena", "Puerto Rico", "Puerto Concordia", "Puerto Lleras",
+  "Mapiripán",
+  // Cauca
+  "Popayán", "Santander de Quilichao", "Puerto Tejada", "Patía", "Miranda", "Corinto",
+  "Guapi", "Piendamó", "Caloto", "Timbío", "Silvia", "Cajibío",
+  "Villa Rica", "Padilla", "Buenos Aires", "Suárez", "Caldono", "Jambaló",
+  "Toribio", "Totoró", "Inzá", "Páez", "Puracé", "Sotará", "La Sierra", "Rosas",
+  "La Vega", "Almaguer", "San Sebastián", "Mercaderes", "Balboa", "Argelia",
+  "López de Micay", "Timbiquí", "Florencia", "Piamonte",
+  // Tolima
+  "Ibagué", "Espinal", "Melgar", "Honda", "Líbano", "Chaparral", "Mariquita", "Flandes",
+  "Guamo", "Purificación", "Fresno", "Cajamarca", "Ortega", "Lérida", "Venadillo", "Natagaima",
+  "Coyaima", "Saldaña", "Rovira", "San Luis", "Valle de San Juan", "Alvarado",
+  "Piedras", "Ambalema", "Armero", "Falan", "Palocabildo", "Casabianca", "Villahermosa",
+  "Murillo", "Santa Isabel", "Anzoátegui", "Roncesvalles", "San Antonio", "Planadas",
+  "Rioblanco", "Atáco", "Coello", "Suarez", "Prado", "Dolores", "Alpujarra",
+  "Cunday", "Villarrica", "Icononzo", "Carmen de Apicalá",
+  // Caldas
+  "Manizales", "La Dorada", "Chinchiná", "Villamaría", "Riosucio", "Anserma", "Supía",
+  "Neira", "Aguadas", "Pácora", "Manzanares", "Pensilvania", "Aranzazu",
+  // Risaralda
+  "Pereira", "Dosquebradas", "Santa Rosa de Cabal", "La Virginia", "Marsella", "Belén de Umbría",
+  "Quinchía", "Apía", "Santuario", "La Celia", "Guática", "Mistrató", "Pueblo Rico",
+  // Quindío
+  "Armenia", "Calarcá", "La Tebaida", "Montenegro", "Quimbaya", "Circasia", "Filandia",
+  "Salento", "Génova", "Pijao",
+  // Caquetá
+  "Florencia", "San Vicente del Caguán", "El Doncello", "La Montañita",
+  "El Paujíl", "Cartagena del Chairá", "Belén de los Andaquíes", "Curillo", "Morelia",
+  // Casanare
+  "Yopal", "Aguazul", "Tauramena", "Paz de Ariporo", "Monterrey", "Hato Corozal",
+  "Maní", "Trinidad", "Nunchía", "Pore", "Orocué",
+  // Chocó
+  "Quibdó", "Istmina", "Tadó", "Condoto", "Riosucio", "Bahía Solano", "Nuquí", "Acandí",
+  "Unguía", "El Carmen de Atrato", "Bojayá", "Certegui", "Novita",
+  // Putumayo
+  "Mocoa", "Puerto Asís", "Orito", "Valle del Guamuez", "Villagarzón", "Puerto Caicedo",
+  "Sibundoy", "San Miguel", "Puerto Guzmán", "Santiago",
+  // Arauca
+  "Arauca", "Saravena", "Tame", "Arauquita", "Fortul", "Puerto Rondón", "Cravo Norte",
+  // Guaviare / Vichada / Amazonas / Guainía / Vaupés / San Andrés
+  "San José del Guaviare", "El Retorno", "Miraflores",
+  "Puerto Carreño", "La Primavera", "Santa Rosalía", "Cumaribo",
+  "Leticia", "Puerto Nariño", "Inírida", "Mitú", "Carurú", "Taraira",
+  "San Andrés", "Providencia",
+];
+
+// Normaliza para comparar (sin acentos, minúsculas, espacios colapsados).
+function norm(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// normalizado -> forma canónica "bonita" (primera vez que aparece en la lista).
+const CANONICO = new Map<string, string>();
+for (const c of CIUDADES_RAW) {
+  const k = norm(c);
+  if (!CANONICO.has(k)) CANONICO.set(k, c);
+}
+
+// Dado un conjunto de candidatos (en orden de preferencia), devuelve la forma
+// canónica de la PRIMERA que sea una ciudad real de Colombia, o null si
+// ninguna lo es (ej. el candidato es en realidad un barrio/comuna).
+export function resolverCiudad(...candidatos: (string | null | undefined)[]): string | null {
+  for (const cand of candidatos) {
+    const s = (cand ?? "").trim();
+    if (!s) continue;
+    const canon = CANONICO.get(norm(s));
+    if (canon) return canon;
+  }
+  return null;
+}

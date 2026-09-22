@@ -1,0 +1,52 @@
+version: "3.8"
+
+# SigRoute para Dokploy. Las bases de datos son externas (PostgreSQL remoto,
+# Planeación + Ejecución), por eso no se levanta contenedor de BD: se pasan
+# por DATABASE_URL_PLAN / DATABASE_URL_EJEC.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Vacío = el frontend llama a /api en el mismo dominio (vía Nginx/Traefik).
+        NEXT_PUBLIC_API_URL: ""
+    container_name: sigroute-sigrouteapp-kpkfv4
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://sigroute.grupo-santacruz.com}
+      DATABASE_URL_PLAN: ${DATABASE_URL_PLAN}
+      DATABASE_URL_EJEC: ${DATABASE_URL_EJEC}
+      SECRET_KEY: ${SECRET_KEY}
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-true}
+      DRIVIN_API_URL: ${DRIVIN_API_URL:-https://external.driv.in/api/external}
+      DRIVIN_API_KEY: ${DRIVIN_API_KEY}
+      DRIVIN_SCHEMA_NAME: ${DRIVIN_SCHEMA_NAME:-Run Errands}
+      CLIENTES_TAT_TOKEN: ${CLIENTES_TAT_TOKEN}
+      TAT_INVOICES_URL: ${TAT_INVOICES_URL}
+      TAT_INVOICES_TOKEN: ${TAT_INVOICES_TOKEN}
+      FACTURAS_AGRO_URL: ${FACTURAS_AGRO_URL:-https://apiconsulta.grupo-santacruz.com/ventas/facturas-agropecuaria-tat}
+      FACTURAS_INV_URL: ${FACTURAS_INV_URL:-https://apiconsulta.grupo-santacruz.com/ventas/facturas-tat-inversiones}
+    restart: unless-stopped
+    networks:
+      - dokploy-network
+    labels:
+      - "dokploy.managed=true"
+      - "traefik.enable=true"
+      - "traefik.http.routers.sigroute.rule=Host(`sigroute.grupo-santacruz.com`)"
+      - "traefik.http.routers.sigroute.entrypoints=websecure"
+      - "traefik.http.routers.sigroute.tls=true"
+      - "traefik.http.routers.sigroute.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sigroute.service=sigroute"
+      - "traefik.http.services.sigroute.loadbalancer.server.port=80"
+      - "traefik.http.routers.sigroute-web.rule=Host(`sigroute.grupo-santacruz.com`)"
+      - "traefik.http.routers.sigroute-web.entrypoints=web"
+      - "traefik.http.routers.sigroute-web.middlewares=sigroute-redirect-https"
+      - "traefik.http.middlewares.sigroute-redirect-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.sigroute-redirect-https.redirectscheme.permanent=true"
+      - "traefik.docker.network=dokploy-network"
+
+networks:
+  dokploy-network:
+    external: true

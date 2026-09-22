@@ -1,0 +1,6 @@
+# Los scripts de shell y el SQL corren en Linux (contenedores / servidor).
+# Sin esto, en Windows se hace checkout con CRLF y el shebang queda como
+# "#!/bin/bash\r" → "bad interpreter: No such file or directory".
+*.sh  text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf

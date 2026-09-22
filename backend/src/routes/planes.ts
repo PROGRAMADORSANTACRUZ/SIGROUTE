@@ -1,0 +1,698 @@
+import { Router } from "express";
+import { prismaEjec as prisma } from "../lib/prisma";
+import { HttpError } from "../middleware/errorHandler";
+import { requireAuth, requirePermiso } from "../middleware/auth";
+import { env } from "../config/env";
+import {
+  fetchDrivinAddresses,
+  buildAddressIndex,
+  matchDrivinAddress,
+} from "../lib/drivinAddresses";
+import { enviarOrdenesANivel } from "../lib/nivel";
+
+const router = Router();
+// Todas las rutas de Diagrama requieren el mismo permiso que gatea la página
+// en el frontend (antes solo exigían sesión, sin chequear el permiso granular).
+router.use(requireAuth, requirePermiso("distrilog.planes.ver"));
+
+// Estados que NO se envían a Drivin (ya enviadas o finalizadas). El resto de
+// órdenes asignadas (Pendiente, Parcial, etc.) sí se envían, igual que en asignación.
+const ESTADOS_NO_ENVIABLES = ["Enviado", "Entregado", "Rechazado"];
+
+const DRIVIN_HEADERS = () => ({
+  "X-API-Key": env.DRIVIN_API_KEY ?? "",
+  "Content-Type": "application/json",
+});
+
+// Convierte un error de Drivin en un mensaje legible (ej. "Invalid address
+// (area_level_3: City cannot be empty) — cliente Abata Sas").
+function drivinErrorMessage(status: number, result: Record<string, unknown>): string {
+  const r = (result?.response ?? {}) as Record<string, unknown>;
+  if (typeof r.description === "string") {
+    const det = Array.isArray(r.details) ? (r.details[0] as Record<string, unknown>) : null;
+    const campo = det ? Object.entries(det).find(([k]) => k !== "data") : null;
+    const data = (det?.data ?? {}) as Record<string, unknown>;
+    const cliente = data.client_name ?? data.name ?? data.code ?? "";
+    const campoTxt = campo ? ` (${campo[0]}: ${Array.isArray(campo[1]) ? (campo[1] as string[]).join(", ") : campo[1]})` : "";
+    const cliTxt = cliente ? ` — cliente ${cliente}` : "";
+    return `Drivin rechazó el plan: ${r.description}${campoTxt}${cliTxt}`;
+  }
+  return `Drivin ${status}: ${JSON.stringify(result).slice(0, 300)}`;
+}
+
+function normKey(s: unknown): string {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .trim();
+}
+
+// Sin transformar mayúsculas/minúsculas (igual que Sigcompro): se envía el texto
+// tal cual está en el maestro. La antigua "titleCase" rompía códigos como
+// "5A" -> "5a" o "PBX" -> "Pbx" al bajar todo a minúsculas antes de capitalizar.
+function soloTexto(s: unknown): string {
+  return String(s ?? "").trim();
+}
+
+// Alias: nombre en las órdenes → nombre real en Drivin / Clientes GS.
+const CLIENTES_ALIAS: Record<string, string> = {
+  "MEGATIENDA SANTA CRUZ": "Megatienda Altos De Santacruz",
+};
+
+// Clave normalizada para cruzar consecutivos/concatenados (igual que en ordenes).
+function claveCliente(s: unknown): string {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Un concatenado que es un NIT (o NIT-sucursal) enruta la orden a otro cliente.
+function esConcatNit(k: string): boolean {
+  return /^\d{5,}(?:-\d+)?$/.test(k);
+}
+
+// Construye el payload del escenario a partir de las órdenes asignadas en BD.
+export async function buildScenarioPayload(opts: {
+  descripcion: string;
+  fecha: string;
+  schemaName: string;
+  fleetName: string | null;
+  placas?: string[];
+  incluirEnviadas?: boolean;
+}) {
+  // Al reenviar (réplica) se incluyen también las órdenes ya enviadas.
+  const estadosExcluidos = opts.incluirEnviadas ? ["Entregado", "Rechazado"] : ESTADOS_NO_ENVIABLES;
+  const where: Record<string, unknown> = {
+    asignadoVehiculo: { not: null },
+    estado: { notIn: estadosExcluidos },
+  };
+  // Si se pasan placas específicas, filtrar solo esas
+  if (opts.placas && opts.placas.length > 0) {
+    const upper = opts.placas.map((p) => p.toUpperCase());
+    where.asignadoVehiculo = { in: upper };
+  }
+  const ordenes = await prisma.orden.findMany({ where });
+  if (ordenes.length === 0) {
+    throw new HttpError(400, "No hay órdenes asignadas para crear el plan");
+  }
+
+  const clientesGS = await prisma.cliente.findMany();
+
+  // Índice de contacto TAT por código (NIT-sucursal = codigoDireccion): referencia y contacto.
+  const tatInfoPorCodigo = new Map<
+    string,
+    { referencia: string | null; telefono: string | null; correo: string | null; ciudad: string | null; departamento: string | null; vendedor: string | null }
+  >();
+  for (const c of clientesGS) {
+    if (c.tipo !== "TAT" || !c.codigoDireccion) continue;
+    tatInfoPorCodigo.set(c.codigoDireccion, {
+      referencia: c.referencia ?? null,
+      telefono: c.telefono ?? null,
+      correo: c.correo ?? null,
+      ciudad: c.provincia ?? null,
+      departamento: c.region ?? null,
+      vendedor: c.vendedor ?? null,
+    });
+  }
+
+  // Direcciones registradas en Drivin + el maestro GS (para asignar el código
+  // correcto por cliente/destino, aunque Drivin no tenga registrado al cliente).
+  const drivinAddresses = await fetchDrivinAddresses();
+  const gsAddresses = clientesGS
+    .filter((c) => c.codigoDireccion)
+    .map((c) => ({
+      code: c.codigoDireccion,
+      name: c.nombreDireccion,
+      client: c.cliente,
+      address1: c.direccion,
+      city: c.comuna ?? c.provincia ?? null,
+      lat: c.lat ? parseFloat(c.lat) : null,
+      lng: c.lon ? parseFloat(c.lon) : null,
+    }));
+  const drivinIndex = buildAddressIndex([...drivinAddresses, ...gsAddresses]);
+
+  type GeoEntry = {
+    direccion: string | null;
+    ciudad: string | null;
+    pais: string | null;
+    lat: string | null;
+    lon: string | null;
+    referencia: string | null;
+    telefono: string | null;
+    correo: string | null;
+    departamento: string | null;
+    vendedor: string | null;
+  };
+  const geoMap = new Map<string, GeoEntry>();
+  const geoByDest = new Map<string, GeoEntry>();
+  const geoByCliente = new Map<string, GeoEntry>();
+
+  for (const c of clientesGS) {
+    const entry: GeoEntry = {
+      direccion: c.direccion,
+      ciudad: c.comuna ?? c.provincia ?? c.region ?? null,
+      pais: c.pais,
+      lat: c.lat,
+      lon: c.lon,
+      referencia: c.referencia ?? null,
+      telefono: c.telefono ?? null,
+      correo: c.correo ?? null,
+      departamento: c.region ?? c.provincia ?? null,
+      vendedor: c.vendedor ?? null,
+    };
+    if (c.cliente && c.nombreDireccion)
+      geoMap.set(`${normKey(c.cliente)}||${normKey(c.nombreDireccion)}`, entry);
+    if (c.nombreDireccion && !geoByDest.has(normKey(c.nombreDireccion)))
+      geoByDest.set(normKey(c.nombreDireccion), entry);
+    // Fallback por nombre de cliente cuando el destino no coincide con nombreDireccion.
+    if (c.cliente && !geoByCliente.has(normKey(c.cliente)))
+      geoByCliente.set(normKey(c.cliente), entry);
+  }
+
+  // Ruteo por concatenado: NIT (TAT) o "cliente - destino"/"destino" (GS) agregado
+  // en OTRO cliente de la BD. Ese cliente destino aporta código/nombre/dirección/geo.
+  type ClienteInfo = {
+    nombre?: string; direccion?: string; codigo?: string;
+    ciudad?: string | null; pais?: string | null; lat?: string | null; lng?: string | null;
+    referencia?: string | null; telefono?: string | null; correo?: string | null; departamento?: string | null;
+    vendedor?: string | null;
+  };
+  const porNitConcat = new Map<string, ClienteInfo>();
+  const porConsecutivo = new Map<string, ClienteInfo>();
+  const indexarConcat = (consecutivos: string | null, info: ClienteInfo) => {
+    if (!consecutivos) return;
+    let lista: string[] = [];
+    try { lista = JSON.parse(consecutivos) as string[]; } catch { return; }
+    for (const con of lista) {
+      const k = claveCliente(con);
+      if (!k) continue;
+      if (esConcatNit(k)) { if (!porNitConcat.has(k)) porNitConcat.set(k, info); }
+      else if (!porConsecutivo.has(k)) porConsecutivo.set(k, info);
+    }
+  };
+  for (const c of clientesGS) {
+    indexarConcat(c.consecutivos, {
+      nombre: c.cliente ?? undefined,
+      direccion: c.direccion ?? undefined,
+      codigo: c.codigoDireccion ?? undefined,
+      ciudad: c.comuna ?? c.provincia ?? c.region ?? null,
+      pais: c.pais,
+      lat: c.lat,
+      lng: c.lon,
+      referencia: c.referencia ?? null,
+      telefono: c.telefono ?? null,
+      correo: c.correo ?? null,
+      departamento: c.region ?? c.provincia ?? null,
+      vendedor: c.vendedor ?? null,
+    });
+  }
+
+  type Linea = (typeof ordenes)[0];
+  const porDireccion = new Map<
+    string,
+    { cliente: string; destino: string; pedidos: Map<string, Linea[]> }
+  >();
+  for (const o of ordenes) {
+    const dirKey = `${normKey(o.cliente)}||${normKey(o.destino)}`;
+    let dir = porDireccion.get(dirKey);
+    if (!dir) {
+      dir = { cliente: o.cliente, destino: o.destino, pedidos: new Map() };
+      porDireccion.set(dirKey, dir);
+    }
+    const pedLines = dir.pedidos.get(o.numeroOrden) ?? [];
+    pedLines.push(o);
+    dir.pedidos.set(o.numeroOrden, pedLines);
+  }
+
+  const clients = [];
+  // Direcciones cuyas órdenes quedaron repartidas en más de un vehículo (Drivin
+  // solo puede visitar la parada con uno -> el resto iría con otro conductor).
+  const conflictosVehiculo: { cliente: string; destino: string; vehiculos: string[] }[] = [];
+  for (const [dirKey, { cliente, destino, pedidos }] of porDireccion) {
+    // Aplica alias si el cliente tiene un nombre distinto en GS/Drivin.
+    const clienteGS = CLIENTES_ALIAS[normKey(cliente)] ?? cliente;
+
+    // Cruza contra las direcciones de Drivin para obtener su código de registro.
+    const drivinMatch =
+      matchDrivinAddress(drivinIndex, clienteGS, destino) ??
+      matchDrivinAddress(drivinIndex, cliente, destino);
+
+    // TAT con sucursal: el código guardado es NIT-sucursal (identidad única por
+    // sucursal). Se envía tal cual a Drivin —junto con su dirección real— para
+    // que cada sucursal sea un cliente distinto y no se colapsen por el NIT.
+    const primeraLinea = pedidos.values().next().value?.[0] as Linea | undefined;
+    const esTat = primeraLinea?.distribucion === "TAT";
+    const codigoTat = esTat ? primeraLinea?.codigo ?? null : null;
+    const direccionTat = esTat ? primeraLinea?.direccion ?? null : null;
+
+    // Ruteo por concatenado: primero el cliente al que se concatenó este (por NIT
+    // en TAT, o por "cliente - destino"/"destino" en GS); si no hay, el propio.
+    const nitLinea = primeraLinea?.nit ?? null;
+    const asignado =
+      (nitLinea ? porNitConcat.get(claveCliente(nitLinea)) : undefined) ??
+      porConsecutivo.get(claveCliente(`${cliente} - ${destino}`)) ??
+      porConsecutivo.get(claveCliente(destino));
+
+    // Busca geo en Clientes GS: exacto → por destino → por nombre alias → por nombre original.
+    const geo =
+      geoMap.get(`${normKey(clienteGS)}||${normKey(destino)}`) ??
+      geoMap.get(dirKey) ??
+      geoByDest.get(normKey(destino)) ??
+      geoByCliente.get(normKey(clienteGS)) ??
+      geoByCliente.get(normKey(cliente)) ??
+      null;
+    // Vendedor por defecto del cliente (si la remisión no trae vendedor propio):
+    // primero el del concatenado, luego GS, luego el maestro TAT por código.
+    const vendedorCliente =
+      asignado?.vendedor ??
+      geo?.vendedor ??
+      (codigoTat ? tatInfoPorCodigo.get(codigoTat)?.vendedor : null) ??
+      null;
+    const orders = [];
+    // Vehículos de las órdenes de esta dirección (para fijar el vehículo a nivel
+    // de dirección y evitar que Drivin reasigne la parada a otro conductor).
+    const vehiculosCliente = new Set<string>();
+    for (const [numeroOrden, lineas] of pedidos) {
+      // Agrupa por producto: suma kg y valor (para el recaudo por ítem).
+      const productMap = new Map<string, { kg: number; valor: number }>();
+      for (const l of lineas) {
+        const k = l.producto || "Sin descripción";
+        const cur = productMap.get(k) ?? { kg: 0, valor: 0 };
+        cur.kg += l.cantidadKg;
+        cur.valor += l.valor ?? 0;
+        productMap.set(k, cur);
+      }
+      // Drivin muestra `units` como "CANT" (kg) y lee el recaudo por ítem en custom_3.
+      const items = Array.from(productMap.entries()).map(([desc, { kg, valor }], i) => {
+        const kgR = Math.round(kg * 100) / 100;
+        return {
+          code: `${numeroOrden}-${i + 1}`,
+          description: desc,
+          units: kgR,
+          units_1: kgR,
+          custom_3: String(Math.round(valor)),
+        };
+      });
+      const totalKg = Math.round(lineas.reduce((s, l) => s + l.cantidadKg, 0) * 100) / 100;
+      // Total de dinero de la remisión (recaudo). Drivin lo lee en custom_3.
+      const totalValor = Math.round(lineas.reduce((s, l) => s + (l.valor ?? 0), 0));
+      // Fecha de venta (DD/MM/YYYY -> YYYY-MM-DD) para billing_date.
+      const fm = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(lineas[0].fecha ?? "");
+      const ventaISO = fm ? `${fm[3]}-${fm[2]}-${fm[1]}` : undefined;
+      const vendedor = lineas[0].vendedor?.trim() || vendedorCliente || undefined;
+      const distribLabel = lineas[0].distribucion === "TAT"
+        ? `TAT ${lineas[0].tatOrigen ?? ""}`.trim()
+        : "AGROPECUARIA";
+      orders.push({
+        code: numeroOrden,
+        alt_code: `${normKey(cliente)}-${normKey(destino)}`,
+        description: vendedor ? soloTexto(vendedor) : undefined,
+        billing_date: ventaISO,
+        units: totalKg,
+        units_1: totalKg,
+        custom_3: String(totalValor),
+        custom_6: distribLabel,
+        vehicle_code: lineas[0].asignadoVehiculo,
+        items,
+      });
+      if (lineas[0].asignadoVehiculo) vehiculosCliente.add(lineas[0].asignadoVehiculo);
+    }
+    // Info final a Drivin: primero la del cliente al que se concatenó; si no, la propia.
+    const nombreFinal = asignado?.nombre ?? clienteGS;
+    const latStr = asignado?.lat ?? geo?.lat ?? null;
+    const lngStr = asignado?.lng ?? geo?.lon ?? null;
+    // Código de la dirección/cliente: identifica la dirección en el maestro de
+    // Drivin. Debe ir como `code` (identificador de la dirección) y `client_code`.
+    const codigoFinal = asignado?.codigo ?? codigoTat ?? drivinMatch?.code ?? null;
+    // Contacto/referencia: primero el del concatenado, luego GS, luego TAT.
+    const tatInfo = codigoTat ? tatInfoPorCodigo.get(codigoTat) : undefined;
+    const referencia = asignado?.referencia ?? geo?.referencia ?? tatInfo?.referencia ?? null;
+    const telefono = asignado?.telefono ?? geo?.telefono ?? tatInfo?.telefono ?? null;
+    const correo = asignado?.correo ?? geo?.correo ?? tatInfo?.correo ?? null;
+    const departamento = asignado?.departamento ?? geo?.departamento ?? tatInfo?.departamento ?? null;
+    // Drivin EXIGE `city` (comuna/ciudad) no vacío. Prioriza barrio/comuna, luego
+    // ciudad/departamento; nunca el nombre del cliente. Fallback final para no
+    // fallar el plan si el cliente no tiene datos geográficos.
+    const city = asignado?.ciudad || geo?.ciudad || tatInfo?.ciudad || departamento || "Barranquilla";
+    // Solo se fija el vehículo de la parada si TODAS sus órdenes van al mismo
+    // (si hay conflicto se deja a nivel de orden para no forzar el equivocado).
+    const vehiculoCliente = vehiculosCliente.size === 1 ? [...vehiculosCliente][0] : undefined;
+    if (vehiculosCliente.size > 1) {
+      conflictosVehiculo.push({ cliente, destino, vehiculos: [...vehiculosCliente] });
+    }
+    clients.push({
+      code: codigoFinal,
+      name: soloTexto(nombreFinal),
+      client_name: soloTexto(nombreFinal),
+      client_code: codigoFinal,
+      address: soloTexto(asignado?.direccion ?? direccionTat ?? drivinMatch?.address1 ?? geo?.direccion ?? destino),
+      reference: referencia ? soloTexto(referencia) : undefined,
+      city: soloTexto(city),
+      state: departamento ? soloTexto(departamento) : undefined,
+      country: asignado?.pais ?? geo?.pais ?? "Colombia",
+      lat: latStr ? parseFloat(latStr) : null,
+      lng: lngStr ? parseFloat(lngStr) : null,
+      vehicle_code: vehiculoCliente,
+      contact_name: soloTexto(nombreFinal),
+      contact_phone: telefono ?? undefined,
+      contact_email: correo ?? undefined,
+      orders,
+    });
+  }
+
+  const vehiculos = [...new Set(ordenes.map((o) => o.asignadoVehiculo!))].map(
+    (placa) => ({ code: placa, description: placa })
+  );
+
+  return {
+    description: opts.descripcion,
+    date: opts.fecha,
+    fleet_name: opts.fleetName,
+    schema_name: opts.schemaName,
+    clients,
+    vehicles: vehiculos,
+    _ordenesCount: ordenes.length,
+    _conflictosVehiculo: conflictosVehiculo,
+  };
+}
+
+// Suma 1 a la cuenta de réplicas (envíos a Drivin) de cada placa. Se reinicia en
+// la limpieza diaria junto con las órdenes.
+async function incrementarReplicas(placas: string[]): Promise<void> {
+  for (const placa of [...new Set(placas.filter(Boolean))]) {
+    await prisma.envioReplica.upsert({
+      where: { placa },
+      create: { placa, veces: 1 },
+      update: { veces: { increment: 1 } },
+    });
+  }
+}
+
+// GET /api/planes/replicas  -> { placa: veces } para mostrar el contador por card
+router.get("/replicas", async (_req, res, next) => {
+  try {
+    const rows = await prisma.envioReplica.findMany();
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.placa] = r.veces;
+    res.json(map);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planes?date=YYYY-MM-DD  -> lista escenarios de Drivin
+router.get("/", async (req, res, next) => {
+  try {
+    const date =
+      String(req.query.date ?? "").slice(0, 10) ||
+      new Date().toISOString().slice(0, 10);
+
+    const resp = await fetch(
+      `${env.DRIVIN_API_URL}/v2/scenarios?date=${date}`,
+      { headers: DRIVIN_HEADERS() }
+    );
+    if (!resp.ok) throw new HttpError(502, `Drivin respondió ${resp.status}`);
+
+    const data = (await resp.json()) as { response?: unknown[] };
+    res.json(data.response ?? []);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planes/schemas  -> schemas únicos de los últimos 30 días
+router.get("/schemas", async (_req, res, next) => {
+  try {
+    const hoy = new Date();
+    const schemas = new Set<string>();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(hoy);
+      d.setDate(d.getDate() - i);
+      const date = d.toISOString().slice(0, 10);
+      const resp = await fetch(
+        `${env.DRIVIN_API_URL}/v2/scenarios?date=${date}`,
+        { headers: DRIVIN_HEADERS() }
+      );
+      if (!resp.ok) continue;
+      const data = (await resp.json()) as {
+        response?: { schema_name?: string | null }[];
+      };
+      for (const s of data.response ?? []) {
+        if (s.schema_name) schemas.add(s.schema_name);
+      }
+      if (schemas.size > 0) break;
+    }
+    res.json(Array.from(schemas).sort());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planes/flotas  -> flotas únicas de los vehículos de Drivin
+router.get("/flotas", async (_req, res, next) => {
+  try {
+    const resp = await fetch(`${env.DRIVIN_API_URL}/v2/vehicles`, {
+      headers: DRIVIN_HEADERS(),
+    });
+    if (!resp.ok) throw new HttpError(502, `Drivin respondió ${resp.status}`);
+
+    const data = (await resp.json()) as {
+      response?: { fleets?: string | null }[];
+    };
+    const flotas = new Set<string>();
+    for (const v of data.response ?? []) {
+      if (v.fleets?.trim()) flotas.add(v.fleets.trim());
+    }
+    res.json(Array.from(flotas).sort());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/planes  -> crea un escenario en Drivin con las órdenes asignadas
+router.post("/", requirePermiso("distrilog.planes.editar"), async (req, res, next) => {
+  try {
+    const descripcion = String(req.body?.descripcion ?? "").trim();
+    const fecha = String(req.body?.fecha ?? "").trim();
+    const schemaName = String(
+      req.body?.schemaName ?? "Distribucion Rutas Agropecuaria"
+    ).trim();
+    const fleetName = String(req.body?.fleetName ?? "").trim() || null;
+    const placas = Array.isArray(req.body?.placas) ? (req.body.placas as string[]) : undefined;
+    const reenviar = Boolean(req.body?.reenviar);
+
+    if (!descripcion || !fecha) {
+      throw new HttpError(400, "Descripción y fecha son obligatorias");
+    }
+
+    const payload = await buildScenarioPayload({
+      descripcion,
+      fecha,
+      schemaName,
+      fleetName,
+      placas,
+      incluirEnviadas: reenviar,
+    });
+
+    const resp = await fetch(`${env.DRIVIN_API_URL}/v2/scenarios`, {
+      method: "POST",
+      headers: DRIVIN_HEADERS(),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    const result = (await resp.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    if (!resp.ok) {
+      throw new HttpError(resp.status >= 500 ? 502 : 400, drivinErrorMessage(resp.status, result));
+    }
+
+    // Marca solo las órdenes enviadas (respetando filtro de placas si aplica)
+    const updateWhere: Record<string, unknown> = {
+      asignadoVehiculo: { not: null },
+      estado: { notIn: ESTADOS_NO_ENVIABLES },
+    };
+    if (placas && placas.length > 0) {
+      updateWhere.asignadoVehiculo = { in: placas.map((p) => p.toUpperCase()) };
+    }
+    await prisma.orden.updateMany({
+      where: updateWhere,
+      data: { estado: "Enviado" },
+    });
+
+    // Cuenta esta réplica (envío) por cada vehículo del plan.
+    await incrementarReplicas((payload.vehicles as { code?: string }[]).map((v) => v.code ?? ""));
+
+    // Envía también al Nivel de Servicio (sin DL). Se le asignará el DL cuando
+    // la remisión pase por Planificación DL.
+    await enviarOrdenesANivel(
+      (payload.clients as { orders: { code: string }[] }[]).flatMap((c) => c.orders.map((o) => o.code))
+    );
+
+    res.status(201).json({
+      ...result,
+      _meta: {
+        vehiculos: payload.vehicles.length,
+        direcciones: payload.clients.length,
+        ordenes: (payload as { _ordenesCount?: number })._ordenesCount ?? 0,
+        conflictos: (payload as { _conflictosVehiculo?: unknown[] })._conflictosVehiculo ?? [],
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planes/preview  -> construye el payload sin enviarlo a Drivin
+router.get("/preview", async (_req, res, next) => {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const payload = await buildScenarioPayload({
+      descripcion: "PREVIEW",
+      fecha: hoy,
+      schemaName: "Distribucion Rutas Agropecuaria",
+      fleetName: null,
+    });
+    res.json(payload);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/planes/agregar  -> agrega órdenes a un escenario existente sin crear uno nuevo
+router.post("/agregar", requirePermiso("distrilog.planes.editar"), async (req, res, next) => {
+  try {
+    const scenarioToken = String(req.body?.scenarioToken ?? "").trim();
+    if (!scenarioToken) throw new HttpError(400, "Falta el token del escenario");
+    const reenviar = Boolean(req.body?.reenviar);
+    const placas = Array.isArray(req.body?.placas) ? (req.body.placas as string[]) : undefined;
+
+    // 1. Verificar estado del escenario.
+    const scenResp = await fetch(
+      `${env.DRIVIN_API_URL}/v2/scenarios?date=${new Date().toISOString().slice(0, 10)}`,
+      { headers: DRIVIN_HEADERS() }
+    );
+    if (!scenResp.ok) throw new HttpError(502, "No se pudo consultar el escenario en Drivin");
+    const scenData = (await scenResp.json()) as {
+      response?: { token?: string; status?: string; description?: string }[];
+    };
+    const escenario = scenData.response?.find((s) => s.token === scenarioToken);
+    if (!escenario) throw new HttpError(404, "Escenario no encontrado");
+    if (escenario.status === "Finished") {
+      throw new HttpError(409, `El escenario "${escenario.description}" ya está Finalizado`);
+    }
+
+    // 2. Obtener órdenes ya existentes en el escenario para detectar duplicados.
+    const existingResp = await fetch(
+      `${env.DRIVIN_API_URL}/v2/orders?token=${scenarioToken}`,
+      { headers: DRIVIN_HEADERS() }
+    );
+    const existingData = (await existingResp.json().catch(() => ({}))) as {
+      response?: { orders?: { code?: string | null }[] }[];
+    };
+    const codigosExistentes = new Set<string>();
+    for (const addr of existingData.response ?? []) {
+      for (const ord of addr.orders ?? []) {
+        if (ord.code) codigosExistentes.add(ord.code);
+      }
+    }
+
+    // 3. Construir payload con las órdenes asignadas pendientes.
+    const payload = await buildScenarioPayload({
+      descripcion: "AGREGAR",
+      fecha: new Date().toISOString().slice(0, 10),
+      schemaName: "Distribucion Rutas Agropecuaria",
+      fleetName: null,
+      placas,
+      incluirEnviadas: reenviar,
+    });
+
+    // 4. Filtrar duplicados: solo enviar órdenes que NO existen ya.
+    const clientesFiltrados = payload.clients
+      .map((c) => ({
+        ...c,
+        orders: c.orders.filter(
+          (o: { code: string }) => !codigosExistentes.has(o.code)
+        ),
+      }))
+      .filter((c) => c.orders.length > 0);
+
+    const totalNuevas = clientesFiltrados.reduce(
+      (s: number, c) => s + c.orders.length,
+      0
+    );
+    const totalDuplicadas =
+      (payload._ordenesCount ?? 0) - totalNuevas;
+
+    if (totalNuevas === 0) {
+      return res.json({
+        _meta: {
+          existentes: codigosExistentes.size,
+          nuevas: 0,
+          duplicadas: totalDuplicadas,
+          mensaje: "No hay órdenes nuevas para agregar",
+        },
+      });
+    }
+
+    // 5. Agregar las órdenes nuevas al escenario existente.
+    const addResp = await fetch(
+      `${env.DRIVIN_API_URL}/v2/orders?token=${scenarioToken}`,
+      {
+        method: "POST",
+        headers: DRIVIN_HEADERS(),
+        body: JSON.stringify({ clients: clientesFiltrados }),
+        signal: AbortSignal.timeout(30000),
+      }
+    );
+    const addResult = (await addResp.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!addResp.ok) {
+      throw new HttpError(addResp.status >= 500 ? 502 : 400, drivinErrorMessage(addResp.status, addResult));
+    }
+
+    // 6. Marcar las órdenes enviadas en la BD.
+    await prisma.orden.updateMany({
+      where: {
+        asignadoVehiculo: { not: null },
+        estado: { notIn: ESTADOS_NO_ENVIABLES },
+      },
+      data: { estado: "Enviado" },
+    });
+
+    // Cuenta la réplica por cada vehículo con órdenes nuevas agregadas.
+    await incrementarReplicas(
+      clientesFiltrados.flatMap((c) => (c.orders as { vehicle_code?: string }[]).map((o) => o.vehicle_code ?? ""))
+    );
+
+    // Envía también al Nivel de Servicio (sin DL) todas las remisiones del plan.
+    await enviarOrdenesANivel(
+      (payload.clients as { orders: { code: string }[] }[]).flatMap((c) => c.orders.map((o) => o.code))
+    );
+
+    const response = (addResult.response ?? {}) as Record<string, unknown>;
+    res.status(201).json({
+      ...addResult,
+      _meta: {
+        scenarioToken,
+        descripcion: escenario.description,
+        estado: escenario.status,
+        existentes: codigosExistentes.size,
+        nuevas: totalNuevas,
+        duplicadas: totalDuplicadas,
+        added: (response.added as string[] | undefined)?.length ?? 0,
+        skipped: (response.skipped as string[] | undefined)?.length ?? 0,
+        ordenes: payload._ordenesCount ?? 0,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

@@ -1,0 +1,40 @@
+# Dependencias (se reinstalan en el build)
+node_modules
+frontend/node_modules
+backend/node_modules
+
+# Builds (se regeneran en el build)
+frontend/.next
+frontend/out
+backend/dist
+backend/prisma/generated
+
+# Git
+.git
+.gitignore
+
+# Variables de entorno (las inyecta Dokploy)
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode
+.idea
+*.suo
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Excels locales de importación (no deben entrar a la imagen)
+*.xlsx
+*.xls
+
+# Deploy / docs que no necesita el build
+deploy.sh
+deploy.ps1
+README.md

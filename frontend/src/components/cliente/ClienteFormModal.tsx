@@ -1,0 +1,395 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  ApiError,
+  crearCliente,
+  updateCliente,
+  type Cliente,
+} from "@/lib/api";
+import { tc, tcVivo } from "@/lib/utils";
+import DireccionInput from "./DireccionInput";
+import MapaDireccion from "./MapaDireccion";
+import CiudadInput from "./CiudadInput";
+import { departamentoDeCiudad } from "@/data/colombia";
+
+const INPUT_CLS =
+  "w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm text-[#14352a] outline-none transition focus:border-[#2f8f4e]";
+
+// Formulario común a los dos tipos de cliente.
+interface Form {
+  codigo: string;
+  nombre: string;
+  direccion: string;
+  referencia: string;
+  barrio: string;
+  manzana: string;
+  lote: string;
+  tipoVia: string;
+  ciudad: string;
+  departamento: string;
+  telefono: string;
+  correo: string;
+  puntoVenta: string;
+  tipo: "TAT" | "Distribución";
+  vendedor: string;
+  activo: boolean;
+  lat: number | null;
+  lng: number | null;
+}
+
+const VACIO: Form = {
+  codigo: "", nombre: "", direccion: "", referencia: "", barrio: "", manzana: "",
+  lote: "", tipoVia: "", ciudad: "",
+  departamento: "", telefono: "", correo: "", puntoVenta: "", tipo: "Distribución",
+  vendedor: "",
+  activo: true, lat: null, lng: null,
+};
+
+function numOrNull(v: string | null): number | null {
+  if (v == null || v === "") return null;
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+function fromGS(c: Cliente): Form {
+  return {
+    codigo: c.codigoDireccion ?? "",
+    nombre: c.cliente ?? c.nombreDireccion ?? "",
+    direccion: c.direccion ?? "",
+    referencia: c.referencia ?? "",
+    barrio: c.barrio ?? c.comuna ?? "",
+    manzana: c.manzana ?? "",
+    lote: c.lote ?? "",
+    tipoVia: c.tipoVia ?? "",
+    ciudad: c.provincia ?? "",
+    departamento: c.region ?? "",
+    telefono: c.telefono ?? "",
+    correo: c.correo ?? "",
+    puntoVenta: c.puntoVenta ?? "",
+    tipo: (c.tipo as Form["tipo"]) || "Distribución",
+    vendedor: c.vendedor ?? "",
+    activo: c.activo ?? true,
+    lat: numOrNull(c.lat),
+    lng: numOrNull(c.lon),
+  };
+}
+
+export default function ClienteFormModal({
+  modo,
+  gs,
+  nombreInicial = "",
+  consecutivoInicial,
+  direccionInicial = "",
+  codigoInicial = "",
+  tipoInicial,
+  vendedorInicial = "",
+  onClose,
+  onSaved,
+}: {
+  modo: "crear" | "editarGS";
+  gs?: Cliente;
+  nombreInicial?: string;
+  consecutivoInicial?: string;
+  direccionInicial?: string;
+  codigoInicial?: string;
+  tipoInicial?: "TAT" | "Distribución";
+  vendedorInicial?: string;
+  onClose: () => void;
+  onSaved: (cliente: Cliente) => void;
+}) {
+  const [form, setForm] = useState<Form>(() => {
+    if (modo === "editarGS" && gs) return fromGS(gs);
+    return {
+      ...VACIO,
+      nombre: nombreInicial ? tc(nombreInicial) : "",
+      direccion: direccionInicial ? tc(direccionInicial) : "",
+      codigo: codigoInicial ?? "",
+      tipo: tipoInicial ?? VACIO.tipo,
+      vendedor: vendedorInicial ?? "",
+    };
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Concatenados (consecutivos "cliente - destino") editables a mano.
+  const [concatenados, setConcatenados] = useState<string[]>(gs?.consecutivos ?? []);
+  const [nuevoConcat, setNuevoConcat] = useState("");
+  function agregarConcat() {
+    const v = nuevoConcat.trim();
+    if (!v) return;
+    setConcatenados((prev) => (prev.some((x) => x.toUpperCase() === v.toUpperCase()) ? prev : [...prev, v]));
+    setNuevoConcat("");
+  }
+  function quitarConcat(c: string) {
+    setConcatenados((prev) => prev.filter((x) => x !== c));
+  }
+
+  function set<K extends keyof Form>(campo: K, valor: Form[K]) {
+    setForm((p) => ({ ...p, [campo]: valor }));
+  }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function guardar() {
+    if (!form.nombre.trim()) { setError("El nombre del cliente es obligatorio."); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const latStr = form.lat != null ? String(form.lat) : null;
+      const lngStr = form.lng != null ? String(form.lng) : null;
+      const payload = {
+        codigoDireccion: form.codigo.trim() || null,
+        cliente: form.nombre.trim(),
+        direccion: form.direccion.trim() || null,
+        referencia: form.referencia.trim() || null,
+        comuna: form.barrio.trim() || null,
+        provincia: form.ciudad.trim() || null,
+        region: form.departamento.trim() || null,
+        barrio: form.barrio.trim() || null,
+        manzana: form.manzana.trim() || null,
+        lote: form.lote.trim() || null,
+        tipoVia: form.tipoVia.trim() || null,
+        telefono: form.telefono.trim() || null,
+        correo: form.correo.trim() || null,
+        puntoVenta: form.puntoVenta.trim() || null,
+        tipo: form.tipo,
+        vendedor: form.vendedor.trim() || null,
+        activo: form.activo,
+        pais: "Colombia",
+        lat: latStr,
+        lon: lngStr,
+      };
+      if (modo === "editarGS" && gs) {
+        const guardado = await updateCliente(gs.id, { ...payload, consecutivos: concatenados });
+        onSaved(guardado);
+      } else {
+        const guardado = await crearCliente({
+          ...payload,
+          consecutivos: [...new Set([...(consecutivoInicial ? [consecutivoInicial] : []), ...concatenados])],
+        });
+        onSaved(guardado);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar el cliente");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const titulo = modo === "crear" ? "Nuevo cliente" : "Editar cliente";
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-3">
+      <div
+        className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-[#eceef0] px-6 py-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-[#14352a]">{titulo}</h3>
+            <span
+              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                form.tipo === "TAT" ? "bg-[#fef3e6] text-[#b5731e]" : "bg-[#e8f3e2] text-[#2f8f4e]"
+              }`}
+            >
+              {form.tipo}
+            </span>
+          </div>
+          <button onClick={onClose} aria-label="Cerrar" className="rounded-lg p-1.5 text-[#7a8794] hover:bg-[#f4f6f3]">
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18 18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="nice-scroll min-h-0 flex-1 overflow-auto p-5">
+          {error && (
+            <div className="mb-4 rounded-lg border border-[#b3261e]/25 bg-[#fbeceb] px-4 py-2.5 text-sm text-[#b3261e]">
+              {error}
+            </div>
+          )}
+
+          <div className="grid items-start gap-4 md:grid-cols-2">
+            {/* Columna izquierda */}
+            <div className="space-y-3">
+              <Bloque titulo="Identificación">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Campo label="Código / NIT / Cédula">
+                    <input value={form.codigo} onChange={(e) => set("codigo", e.target.value)} className={INPUT_CLS} />
+                  </Campo>
+                  <label className="flex items-end gap-2 pb-2 text-sm text-[#45505e]">
+                    <input type="checkbox" checked={form.activo} onChange={(e) => set("activo", e.target.checked)} className="h-4 w-4 accent-[#2f8f4e]" />
+                    Cliente activo
+                  </label>
+                  <Campo label="Nombre / Razón social *" full>
+                    <input value={form.nombre} onChange={(e) => set("nombre", tcVivo(e.target.value))} className={INPUT_CLS} />
+                  </Campo>
+                </div>
+              </Bloque>
+
+              <Bloque titulo="Dirección">
+                <DireccionInput value={form.direccion} onChange={(v) => set("direccion", v)} />
+                <div className="mt-3">
+                  <Campo label="Referencia">
+                    <input value={form.referencia} onChange={(e) => set("referencia", tcVivo(e.target.value))} placeholder="Ej. Frente Al Parque, Casa Esquinera…" className={INPUT_CLS} />
+                  </Campo>
+                </div>
+              </Bloque>
+
+              <Bloque titulo="Contacto">
+                <div className="flex flex-wrap gap-3">
+                  <Campo label="Teléfono">
+                    <input
+                      value={form.telefono}
+                      onChange={(e) => set("telefono", e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      inputMode="numeric"
+                      placeholder="3001234567"
+                      className={`${INPUT_CLS} max-w-[10rem]`}
+                    />
+                  </Campo>
+                  <Campo label="Correo electrónico">
+                    <input
+                      value={form.correo}
+                      onChange={(e) => set("correo", e.target.value)}
+                      type="email"
+                      placeholder="correo@ejemplo.com"
+                      className={`${INPUT_CLS} min-w-[14rem]`}
+                    />
+                  </Campo>
+                  <Campo label="Vendedor">
+                    <input
+                      value={form.vendedor}
+                      onChange={(e) => set("vendedor", e.target.value)}
+                      onBlur={(e) => set("vendedor", tc(e.target.value))}
+                      placeholder="Nombre del vendedor"
+                      className={`${INPUT_CLS} min-w-[14rem]`}
+                    />
+                  </Campo>
+                </div>
+              </Bloque>
+
+              <Bloque titulo={`Concatenados (${concatenados.length})`}>
+                <div className="flex gap-2">
+                  <input
+                    value={nuevoConcat}
+                    onChange={(e) => setNuevoConcat(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); agregarConcat(); } }}
+                    placeholder="CLIENTE - DESTINO  o  NIT-sucursal (ej. 900554896-2)"
+                    className={`${INPUT_CLS} min-w-0 flex-1`}
+                  />
+                  <button type="button" onClick={agregarConcat} className="shrink-0 rounded-lg bg-[#2f8f4e] px-3 py-2 text-sm font-medium text-white hover:bg-[#277a42]">Agregar</button>
+                </div>
+                <p className="mt-1 text-[11px] text-[#7a8794]">Agrega un NIT-sucursal (ej. 900554896-2) para que ese cliente TAT se despache con este cliente.</p>
+                {concatenados.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {concatenados.map((c, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 rounded-full bg-[#eef2f8] px-2.5 py-1 text-[11px] font-medium text-[#4a6fa5]">
+                        {c}
+                        <button type="button" onClick={() => quitarConcat(c)} title="Quitar" className="text-[#4a6fa5] hover:text-[#b3261e]">
+                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 18 18 6M6 6l12 12" /></svg>
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-[#7a8794]">Sin concatenados asignados a este cliente.</p>
+                )}
+              </Bloque>
+
+              <Bloque titulo="Clasificación">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <label className="flex items-center gap-2 text-sm text-[#45505e]">
+                    <input type="radio" name="tipo-cliente" checked={form.tipo === "Distribución"} onChange={() => set("tipo", "Distribución")} className="h-4 w-4 accent-[#2f8f4e]" />
+                    Distribución
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-[#45505e]">
+                    <input type="radio" name="tipo-cliente" checked={form.tipo === "TAT"} onChange={() => set("tipo", "TAT")} className="h-4 w-4 accent-[#2f8f4e]" />
+                    TAT
+                  </label>
+                </div>
+                <div className="mt-2">
+                  <Campo label="Punto de venta">
+                    <input value={form.puntoVenta} onChange={(e) => set("puntoVenta", e.target.value)} placeholder="PDV La 43" className={INPUT_CLS} />
+                  </Campo>
+                </div>
+              </Bloque>
+            </div>
+
+            {/* Columna derecha */}
+            <div className="space-y-3">
+              <Bloque titulo="Barrio y ciudad">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Campo label="Barrio">
+                    <input value={form.barrio} onChange={(e) => set("barrio", tcVivo(e.target.value))} placeholder="Barrio" className={INPUT_CLS} />
+                  </Campo>
+                  <Campo label="Ciudad">
+                    <CiudadInput
+                      value={form.ciudad}
+                      onSelect={(ciudad, departamento) =>
+                        setForm((p) => ({ ...p, ciudad, departamento }))
+                      }
+                    />
+                  </Campo>
+                  <Campo label="Departamento" full>
+                    <input
+                      value={form.departamento}
+                      readOnly
+                      placeholder="Se completa al elegir la ciudad"
+                      className={`${INPUT_CLS} cursor-not-allowed bg-[#f4f6f3] text-[#7a8794]`}
+                    />
+                  </Campo>
+                </div>
+              </Bloque>
+
+              <Bloque titulo="Ubicación del pedido">
+                <MapaDireccion
+                  direccion={form.direccion}
+                  barrio={form.barrio}
+                  ciudad={form.ciudad}
+                  referencia={form.referencia}
+                  lat={form.lat}
+                  lng={form.lng}
+                  onUbicacion={(la, lo) => setForm((p) => ({ ...p, lat: la, lng: lo }))}
+                  onBarrio={(b) => set("barrio", b)}
+                  onCiudad={(ci) => setForm((p) => ({ ...p, ciudad: ci, departamento: departamentoDeCiudad(ci) ?? p.departamento }))}
+                  onDireccion={(d) => set("direccion", tc(d))}
+                  onDepartamento={(dep) => set("departamento", tc(dep))}
+                />
+              </Bloque>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-[#eceef0] px-6 py-4">
+          <button onClick={onClose} disabled={saving} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-50">
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={saving} className="rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-50">
+            {saving ? "Guardando…" : modo === "crear" ? "Crear cliente" : "Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Campo({ label, full, children }: { label: string; full?: boolean; children: React.ReactNode }) {
+  return (
+    <label className={`block ${full ? "sm:col-span-2" : ""}`}>
+      <span className="mb-1 block text-xs font-medium text-[#7a8794]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Bloque({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-[#e1e9dd] bg-[#fbfdfa] p-3">
+      <h4 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-[#2f8f4e]">{titulo}</h4>
+      {children}
+    </section>
+  );
+}

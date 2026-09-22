@@ -1,0 +1,24 @@
+.env
+.env.local
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.bak
+.DS_Store
+_*inspect*.json
+
+# Stack Next.js + Express (rutas_web/backend, rutas_web/frontend)
+node_modules/
+dist/
+.next/
+backend/prisma/generated/
+
+# Pipeline de despliegue (local, con credenciales)
+_deploy.sh
+.deploy-secrets
+
+# Fuentes Excel locales para importacion; no deben publicarse ni entrar en Docker.
+base de datos.xlsx
+conductores.xlsx
+rutas1.xlsx
