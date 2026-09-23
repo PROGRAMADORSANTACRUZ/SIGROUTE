@@ -285,7 +285,6 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
   const [buscarDestino, setBuscarDestino] = useState(editando?.cliente.nombre ?? "");
   const [clienteSel, setClienteSel] = useState<ErrandsCliente | null>(editando?.cliente ?? null);
   const [resultados, setResultados] = useState<ErrandsCliente[]>([]);
-  const [kilos, setKilos] = useState(String(editando?.kilos ?? 1));
   const [estado, setEstado] = useState<ErrandsPedido["estado"]>(editando?.estado ?? "REVISADO");
   const [observaciones, setObservaciones] = useState(editando?.observaciones ?? "");
   const [cola, setCola] = useState<{ label: string; input: ErrandsPedidoInput }[]>([]);
@@ -329,7 +328,6 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
       clienteId: clienteSel.id,
       puntoVentaId: puntoVentaId ? Number(puntoVentaId) : null,
       domiciliarioId: domiciliarioId ? Number(domiciliarioId) : null,
-      kilos: Number(kilos) || 1,
       estado,
       observaciones: observaciones || undefined,
     };
@@ -338,7 +336,6 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
   function limpiarParaSiguiente() {
     setBuscarDestino("");
     setClienteSel(null);
-    setKilos("1");
   }
 
   function agregarACola() {
@@ -387,17 +384,13 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
         </div>
 
         <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="mb-4">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-[#7a8794]">PDV de origen *</span>
               <select value={puntoVentaId} onChange={(e) => setPuntoVentaId(e.target.value)} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
                 <option value="">-- Seleccione PDV --</option>
                 {pdvs.map((p) => <option key={p.id} value={p.id}>{pdvLabel(p)}</option>)}
               </select>
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-[#7a8794]">Kilos</span>
-              <input type="number" min={0} step="0.1" value={kilos} onChange={(e) => setKilos(e.target.value)} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]" />
             </label>
           </div>
 

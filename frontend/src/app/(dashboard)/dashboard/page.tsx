@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ApiError,
   getNovedades,
@@ -185,10 +186,23 @@ interface ResumenPlan {
 }
 
 export default function DashboardPage() {
-  const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver");
-  const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver");
-  const puedeVerErrands = usePermiso("dashboard.errands.ver");
-  const puedeVerComparativo = usePermiso("dashboard.comparativo.ver");
+  return (
+    <Suspense fallback={null}>
+      <DashboardPageInner />
+    </Suspense>
+  );
+}
+
+// Un solo dashboard reutilizado por los 3 accesos: /dashboard (completo, con
+// las 4 pestañas), y /dashboard?panel=planeacion|ejecucion (enlazado desde el
+// item "Dashboard" de cada panel del Sidebar) que solo deja ver las pestañas
+// de su propio panel — Run Errands y Comparativo cuelgan del panel Ejecución.
+function DashboardPageInner() {
+  const panel = useSearchParams().get("panel");
+  const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver") && panel !== "planeacion";
+  const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver") && panel !== "ejecucion";
+  const puedeVerErrands = usePermiso("dashboard.errands.ver") && panel !== "planeacion";
+  const puedeVerComparativo = usePermiso("dashboard.comparativo.ver") && panel !== "planeacion";
   const [vista, setVista] = useState<"ejecucion" | "planeacion" | "run-errands" | "comparativo">("ejecucion");
 
   // Si la pestaña activa deja de estar permitida (o al cargar el usuario), se
@@ -414,14 +428,20 @@ export default function DashboardPage() {
     };
   }, [resumen, planillas, novedades, vehiculos, ejecDesde, ejecHasta]);
 
+  // El selector de pestañas solo tiene sentido si hay más de una para elegir
+  // (p. ej. dentro del panel Ejecución: Ejecución + Run Errands + Comparativo).
+  const tabsVisibles = [puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo].filter(Boolean).length;
+  const tituloPanel = panel === "planeacion" ? "Dashboard · Planeación" : panel === "ejecucion" ? "Dashboard · Ejecución" : "Dashboard";
+
   return (
     <div className="flex h-full flex-col overflow-auto p-3 sm:p-4">
       <header className="mb-2.5 flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-[#14352a]">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-[#14352a]">{tituloPanel}</h1>
           <p className="text-sm text-[#5f7a68]">Resumen operativo en tiempo real · Santa Cruz</p>
         </div>
         <div className="flex items-center gap-2">
+          {tabsVisibles > 1 && (
           <div className="flex items-center gap-0.5 rounded-lg border border-[#dfe4e0] bg-white p-0.5">
             {puedeVerEjecucion && (
               <button
@@ -456,6 +476,7 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
+          )}
           <button onClick={() => { setLoading(true); load().finally(() => setLoading(false)); }}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#dfe4e0] bg-white text-[#45505e] hover:bg-[#f4f6f3]">
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

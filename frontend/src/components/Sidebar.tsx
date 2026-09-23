@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getUser, logout, type AuthUser } from "@/lib/api";
 import { puedeAcceder } from "@/data/modulos";
@@ -132,19 +132,19 @@ const plantillaIcon = (
   </svg>
 );
 
-// Dashboard: ítem suelto, siempre visible (no requiere permiso granular).
-const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: dashboardIcon },
-];
+// Cada panel (Planeación/Ejecución) trae su propio Dashboard como primer
+// ítem — ya no hay un Dashboard global suelto; el panel se elige en "/".
+const navItems: NavItem[] = [];
 
 // Dropdowns de 2do nivel del sidebar: Planeación (módulos originales de
-// rutas_web), Módulos de ejecución (DISTRILOG + Errands) y Configuración
-// (maestros/catálogos de AMBOS dominios en un solo lugar, separados por
-// sección en vez de repartidos entre Planeación y Ejecución).
+// rutas_web), Módulos de ejecución (DISTRILOG + Errands + Plantillas TAT) y
+// Configuración (maestros/catálogos de AMBOS dominios en un solo lugar,
+// separados por sección en vez de repartidos entre Planeación y Ejecución).
 const navGroups: NavGroup[] = [
   {
     label: "Planeación",
     items: [
+      { href: "/dashboard?panel=planeacion", label: "Dashboard", icon: dashboardIcon },
       { href: "/planeacion/preplanificacion", label: "Pre-planificación", icon: mapPinIcon },
       { href: "/planeacion/programacion", label: "Planificación", icon: diagramaIcon },
       { href: "/planeacion/asignacion", label: "Preasignación", icon: rutaIcon },
@@ -157,6 +157,7 @@ const navGroups: NavGroup[] = [
   {
     label: "Módulos de ejecución",
     items: [
+      { href: "/dashboard?panel=ejecucion", label: "Dashboard", icon: dashboardIcon },
       { href: "/ordenes", label: "Cargar Órdenes", icon: boxIcon },
       { href: "/asignacion-vehiculos", label: "Asignación de órdenes", icon: truckIcon },
       { href: "/planes", label: "Diagrama", icon: diagramaIcon },
@@ -174,11 +175,6 @@ const navGroups: NavGroup[] = [
       // Placeholder: el módulo real (antes embebido vía iframe SIGLOG) aún no
       // tiene lógica propia — se deja el ítem listo para conectarlo después.
       { href: "/errands", label: "Run Errands", icon: errandsIcon },
-    ],
-  },
-  {
-    label: "Plantillas TAT",
-    items: [
       { href: "/plantillas-tat/agropecuaria", label: "TAT Agropecuaria", icon: plantillaIcon },
       { href: "/plantillas-tat/inversiones", label: "TAT Inversiones", icon: plantillaIcon },
     ],
@@ -214,6 +210,10 @@ export default function Sidebar({
   onClose?: () => void;
 }) {
   const pathname = usePathname();
+  const search = useSearchParams();
+  // Ruta completa (con query) para poder distinguir /dashboard?panel=planeacion
+  // de /dashboard?panel=ejecucion en el estado "activo" del ítem del Sidebar.
+  const rutaActual = search.toString() ? `${pathname}?${search.toString()}` : pathname;
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
@@ -258,8 +258,8 @@ export default function Sidebar({
 
   function renderItem(item: NavItem) {
     const active =
-      pathname === item.href ||
-      (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`) && !item.children);
+      rutaActual === item.href ||
+      (!item.href.includes("?") && pathname.startsWith(`${item.href}/`) && !item.children);
     const anyChildActive = item.children?.some(
       (c) => pathname === c.href || pathname.startsWith(`${c.href}/`)
     );
@@ -364,16 +364,18 @@ export default function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Marca */}
+        {/* Marca — enlaza a "/" para volver al selector de panel */}
         <div className={`flex items-center gap-3 border-b border-white/15 px-5 py-4 ${collapsed ? "lg:justify-center lg:px-2" : ""}`}>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/15 p-1.5 backdrop-blur-sm">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="Santacruz" className="h-full w-full object-contain" />
-          </div>
-          <div className={`leading-tight ${collapsed ? "lg:hidden" : ""}`}>
-            <p className="text-sm font-bold text-white">SigRoute</p>
-            <p className="text-xs text-white/60">Grupo Santacruz</p>
-          </div>
+          <Link href="/" title="Cambiar de panel" className={`flex min-w-0 items-center gap-3 ${collapsed ? "lg:justify-center" : ""}`}>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-white/15 p-1.5 backdrop-blur-sm">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Santacruz" className="h-full w-full object-contain" />
+            </div>
+            <div className={`leading-tight ${collapsed ? "lg:hidden" : ""}`}>
+              <p className="text-sm font-bold text-white">SigRoute</p>
+              <p className="text-xs text-white/60">Grupo Santacruz</p>
+            </div>
+          </Link>
           <button
             onClick={onClose}
             aria-label="Cerrar menú"

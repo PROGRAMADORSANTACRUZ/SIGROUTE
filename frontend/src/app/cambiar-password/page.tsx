@@ -34,7 +34,7 @@ export default function CambiarPasswordPage() {
     setLoading(true);
     try {
       await changePassword(nueva.trim(), confirmar.trim());
-      router.push("/dashboard");
+      router.push("/");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error inesperado. Intenta de nuevo.");
     } finally {
