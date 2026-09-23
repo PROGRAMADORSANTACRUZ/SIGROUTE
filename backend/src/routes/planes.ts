@@ -55,6 +55,16 @@ function soloTexto(s: unknown): string {
   return String(s ?? "").trim();
 }
 
+// Valida que una coordenada (string) sea un número real dentro de rango. Datos
+// corruptos (ej. "1153543794", al que se le "comió" el punto decimal) tumban
+// el plan COMPLETO en Drivin ("lat: must be <= 90"); mejor omitir esa
+// coordenada puntual que romper el envío de todas las demás órdenes.
+function coordenadaValida(valor: string | null | undefined, limite: number): number | null {
+  if (!valor) return null;
+  const n = parseFloat(valor);
+  return Number.isFinite(n) && n >= -limite && n <= limite ? n : null;
+}
+
 // Alias: nombre en las órdenes → nombre real en Drivin / Clientes GS.
 const CLIENTES_ALIAS: Record<string, string> = {
   "MEGATIENDA SANTA CRUZ": "Megatienda Altos De Santacruz",
@@ -354,8 +364,8 @@ export async function buildScenarioPayload(opts: {
       city: soloTexto(city),
       state: departamento ? soloTexto(departamento) : undefined,
       country: asignado?.pais ?? geo?.pais ?? "Colombia",
-      lat: latStr ? parseFloat(latStr) : null,
-      lng: lngStr ? parseFloat(lngStr) : null,
+      lat: coordenadaValida(latStr, 90),
+      lng: coordenadaValida(lngStr, 180),
       vehicle_code: vehiculoCliente,
       contact_name: soloTexto(nombreFinal),
       contact_phone: telefono ?? undefined,
