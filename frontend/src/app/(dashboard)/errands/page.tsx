@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
@@ -31,6 +31,20 @@ import {
 const ESTADOS: ErrandsPedido["estado"][] = ["PENDIENTE", "EN_PROCESO", "ENTREGADO", "CANCELADO", "EDITADO", "REVISADO"];
 function pdvLabel(p: ErrandsPuntoVenta) {
   return `PDV${String(p.indicador).padStart(2, "0")} · ${p.nombre}`;
+}
+// Empareja el nombre del PDV con el esquema real de Drivin del mismo punto de
+// venta (mismo criterio que el backend en errands.ts, para autoseleccionar en
+// el modal sin esperar a guardar).
+function normalizarNombre(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\./g, "").trim()
+    .replace(/\bpdv\b/g, "")
+    .replace(/carnes\s+santacruz/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function emparejarEsquema(pdvNombre: string, esquemas: ErrandsDrivinEsquema[]): string | null {
+  const objetivo = normalizarNombre(pdvNombre);
+  return esquemas.find((e) => normalizarNombre(e.name) === objetivo)?.name ?? null;
 }
 const ESTADO_COLOR: Record<string, string> = {
   PENDIENTE: "bg-[#fdf6e9] text-[#a86a12]",
@@ -340,6 +354,7 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
   const [observaciones, setObservaciones] = useState(editando?.observaciones ?? "");
   const [esquemas, setEsquemas] = useState<ErrandsDrivinEsquema[]>([]);
   const [schemaName, setSchemaName] = useState(editando?.drivinSchemaName ?? "");
+  const [sinEsquemaPdv, setSinEsquemaPdv] = useState(false);
   const [cola, setCola] = useState<{ label: string; input: ErrandsPedidoInput }[]>([]);
   const [creandoCliente, setCreandoCliente] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -348,6 +363,22 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
   useEffect(() => {
     getErrandsDrivinEsquemas().then(setEsquemas).catch(() => setEsquemas([]));
   }, []);
+
+  // Autoselecciona el esquema de Drivin según el PDV elegido (mismo criterio
+  // que el backend); si no hay match, deja el select vacío y avisa en rojo.
+  // Al editar, la primera pasada respeta el esquema ya guardado en el pedido.
+  const primeraPasadaPdv = useRef(true);
+  useEffect(() => {
+    if (primeraPasadaPdv.current) {
+      primeraPasadaPdv.current = false;
+      if (editando) return;
+    }
+    if (!puntoVentaId) { setSchemaName(""); setSinEsquemaPdv(false); return; }
+    const pdv = pdvs.find((p) => String(p.id) === puntoVentaId);
+    const match = pdv ? emparejarEsquema(pdv.nombre, esquemas) : null;
+    setSchemaName(match ?? "");
+    setSinEsquemaPdv(!match);
+  }, [puntoVentaId, esquemas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const domiciliariosFiltrados = puntoVentaId
     ? domiciliarios.filter((d) => d.activo && d.puntoVentaId === Number(puntoVentaId))
@@ -400,6 +431,7 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
     const input = armarInput();
     if (!puntoVentaId) return showToast("Selecciona el PDV de origen", "error");
     if (!input) return showToast("Selecciona un destino válido", "error");
+    if (!schemaName) return showToast("Selecciona un esquema de Drivin para este PDV", "error");
     setCola((prev) => [...prev, { label: `${clienteSel?.nombre} (${clienteSel?.codigo})`, input }]);
     limpiarParaSiguiente();
   }
@@ -410,6 +442,8 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
 
   async function guardar() {
     if (!puntoVentaId) return showToast("Selecciona el PDV de origen", "error");
+    if (!clienteSel) return showToast("Selecciona un destino válido", "error");
+    if (!schemaName) return showToast("Selecciona un esquema de Drivin para este PDV", "error");
     setGuardando(true);
     try {
       if (editando) {
@@ -467,12 +501,16 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
 
           <div className="mb-4">
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-[#7a8794]">Esquema Drivin</span>
-              <select value={schemaName} onChange={(e) => setSchemaName(e.target.value)} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
-                <option value="">Automático (según PDV)</option>
+              <span className="text-xs font-medium text-[#7a8794]">Esquema Drivin *</span>
+              <select value={schemaName} onChange={(e) => { setSchemaName(e.target.value); setSinEsquemaPdv(false); }} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
+                <option value="">-- Seleccione esquema --</option>
                 {esquemas.map((e) => <option key={e.code} value={e.name}>{e.name}</option>)}
               </select>
-              <span className="text-xs text-[#9aa4af]">Se elige solo según el PDV de origen; si no encuentra uno, elige aquí manualmente.</span>
+              {sinEsquemaPdv ? (
+                <span className="text-xs font-medium text-[#b3261e]">No se encontró un esquema de Drivin para este PDV; elige uno manualmente.</span>
+              ) : (
+                <span className="text-xs text-[#9aa4af]">Se autocompleta según el PDV de origen.</span>
+              )}
             </label>
           </div>
 
