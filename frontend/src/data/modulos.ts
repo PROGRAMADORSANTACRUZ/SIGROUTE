@@ -87,3 +87,17 @@ export function primeraRutaPanel(
   return accesible?.key ?? null;
 }
 
+// ¿A qué panel (Planeación/Ejecución) pertenece esta ruta? Se usa en el
+// Sidebar para saber cuál de los 2 grupos mostrar mientras se navega dentro
+// de un panel. Configuración queda afuera a propósito: aparece en los 2
+// paneles, así que no debe "cambiar" el panel activo al entrar ahí.
+export function panelDeRuta(fullPath: string): "Planeación" | "Ejecución" | null {
+  const pathname = fullPath.split("?")[0];
+  const modulo = MODULOS.find((m) => {
+    if (m.grupo === "Configuración") return false;
+    const key = m.key.split("?")[0];
+    return fullPath === m.key || pathname.startsWith(`${key}/`);
+  });
+  return modulo ? (modulo.grupo as "Planeación" | "Ejecución") : null;
+}
+

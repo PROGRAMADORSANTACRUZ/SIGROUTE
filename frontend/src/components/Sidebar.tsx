@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getUser, logout, type AuthUser } from "@/lib/api";
-import { puedeAcceder } from "@/data/modulos";
+import { puedeAcceder, panelDeRuta } from "@/data/modulos";
 
 interface NavItem {
   href: string;
@@ -216,8 +216,13 @@ export default function Sidebar({
   const rutaActual = search.toString() ? `${pathname}?${search.toString()}` : pathname;
   const router = useRouter();
   const [user, setUser] = useState<AuthUser | null>(null);
+  // Cuál de los 2 paneles (Planeación/Ejecución) se muestra en el Sidebar.
+  // Se detecta automáticamente por la ruta actual y se recuerda en
+  // localStorage para paginas "neutras" (Configuración, / , /dashboard sin
+  // ?panel=) que no cambian el panel activo por sí solas.
+  const [panelActivo, setPanelActivo] = useState<"Planeación" | "Ejecución" | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(navGroups.map((g) => [g.label, true]))
+    Object.fromEntries(navGroups.map((g) => [g.label, g.label !== "Configuración"]))
   );
   const [openDropdowns, setOpenDropdowns] = useState<Record<string, boolean>>({});
   // Sidebar colapsable a modo "riel" de solo íconos; se recuerda entre visitas.
@@ -225,6 +230,17 @@ export default function Sidebar({
 
   useEffect(() => { setUser(getUser()); }, []);
   useEffect(() => { setCollapsed(window.localStorage.getItem("sidebar-collapsed") === "1"); }, []);
+  useEffect(() => {
+    const guardado = window.localStorage.getItem("sigroute-panel-activo");
+    if (guardado === "Planeación" || guardado === "Ejecución") setPanelActivo(guardado);
+  }, []);
+  useEffect(() => {
+    const detectado = panelDeRuta(rutaActual);
+    if (detectado) {
+      setPanelActivo(detectado);
+      window.localStorage.setItem("sigroute-panel-activo", detectado);
+    }
+  }, [rutaActual]);
   function toggleCollapsed() {
     setCollapsed((prev) => {
       const next = !prev;
@@ -391,12 +407,41 @@ export default function Sidebar({
             {navItems.map((item) => renderItem(item))}
           </div>
 
-          {navGroups.map((group) => {
+          {navGroups
+            .filter((group) => {
+              // Configuración siempre se evalúa; el otro panel se oculta
+              // mientras no sea el panel activo (se detecta por la ruta).
+              if (group.label === "Configuración") return true;
+              if (!panelActivo) return true; // aún sin detectar: no ocultar de más
+              return group.label === (panelActivo === "Planeación" ? "Planeación" : "Módulos de ejecución");
+            })
+            .map((group) => {
             const isOpen = open[group.label];
+            const esConfiguracion = group.label === "Configuración";
             const visibleItems = group.items.filter(
               (item) => item.disabled || puedeAcceder(item.href, user?.role, user?.permisos)
             );
             if (visibleItems.length === 0) return null;
+            // Planeación/Ejecución ya vienen filtradas a un solo panel a la
+            // vez, así que sus ítems se muestran siempre (sin plegar); solo
+            // Configuración conserva el dropdown plegable (cerrado por defecto).
+            if (!esConfiguracion) {
+              return (
+                <div key={group.label}>
+                  <p className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-white/45 ${collapsed ? "lg:hidden" : ""}`}>
+                    {group.label}
+                  </p>
+                  {collapsed && <div className="my-1.5 hidden border-t border-white/10 lg:block" />}
+                  <div className="mt-1 space-y-0.5">
+                    {visibleItems.map((item) => (
+                      <div key={item.href}>
+                        {renderItem(item)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={group.label}>
                 <button
@@ -446,6 +491,17 @@ export default function Sidebar({
               </p>
             </div>
           </div>
+          <button
+            onClick={() => router.push("/")}
+            title={collapsed ? "Cambiar panel" : undefined}
+            className={`mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white/75 transition-colors hover:bg-white/10 ${collapsed ? "lg:justify-center" : ""}`}
+          >
+            <svg className="h-5 w-5 shrink-0 text-white/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            <span className={collapsed ? "lg:hidden" : ""}>Cambiar panel</span>
+          </button>
           <div className={`mt-1 flex items-center gap-1.5 ${collapsed ? "lg:flex-col" : ""}`}>
             <button
               onClick={handleLogout}

@@ -23,17 +23,9 @@ const iconEjecucion = (
   </svg>
 );
 
-const iconConfiguracion = (
-  <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-);
-
 const PANELES: { grupo: Modulo["grupo"]; titulo: string; descripcion: string; icon: React.ReactNode }[] = [
   { grupo: "Planeación", titulo: "Planeación", descripcion: "Planificación, preasignación, distribución y reportes.", icon: iconPlaneacion },
   { grupo: "Ejecución", titulo: "Ejecución", descripcion: "Cargue de órdenes, despacho, nivel de servicio y Run Errands.", icon: iconEjecucion },
-  { grupo: "Configuración", titulo: "Configuración", descripcion: "Usuarios, roles, catálogos y maestros del sistema.", icon: iconConfiguracion },
 ];
 
 export default function PanelSelector() {
@@ -71,7 +63,7 @@ export default function PanelSelector() {
         <h1 className="mt-5 text-3xl font-bold text-white">Hola, {primerNombre}</h1>
         <p className="mt-1 text-sm text-white/80">¿A qué panel deseas ingresar?</p>
 
-        <div className="mt-10 grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mt-10 grid w-full max-w-xl grid-cols-1 gap-4 sm:grid-cols-2">
           {PANELES.map((p) => {
             const habilitado = puedeAccederPanel(p.grupo, user.role, user.permisos);
             const destino = primeraRutaPanel(p.grupo, user.role, user.permisos);
@@ -95,7 +87,12 @@ export default function PanelSelector() {
               );
             }
             return (
-              <Link key={p.grupo} href={destino} className="flex flex-col items-start rounded-2xl bg-[#f7faf5] p-6 text-left shadow-lg transition-transform hover:-translate-y-0.5">
+              <Link
+                key={p.grupo}
+                href={destino}
+                onClick={() => window.localStorage.setItem("sigroute-panel-activo", p.grupo)}
+                className="flex flex-col items-start rounded-2xl bg-[#f7faf5] p-6 text-left shadow-lg transition-transform hover:-translate-y-0.5"
+              >
                 {contenido}
               </Link>
             );

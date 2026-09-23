@@ -193,35 +193,41 @@ export default function DashboardPage() {
   );
 }
 
-// Un solo dashboard reutilizado por los 3 accesos: /dashboard (completo, con
-// las 4 pestañas), y /dashboard?panel=planeacion|ejecucion (enlazado desde el
-// item "Dashboard" de cada panel del Sidebar) que solo deja ver las pestañas
-// de su propio panel — Run Errands y Comparativo cuelgan del panel Ejecución.
+// Un solo dashboard reutilizado por los 3 accesos: /dashboard (todas las
+// pestañas a las que el usuario tenga permiso, con su switcher), y
+// /dashboard?panel=planeacion|ejecucion (enlazado desde el item "Dashboard"
+// de cada panel del Sidebar) que solo cambia cuál pestaña viene seleccionada
+// por defecto — quien tenga permiso de varios dashboards igual puede cambiar
+// de pestaña ahí mismo sin salir de la página.
 function DashboardPageInner() {
   const panel = useSearchParams().get("panel");
-  const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver") && panel !== "planeacion";
-  const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver") && panel !== "ejecucion";
-  const puedeVerErrands = usePermiso("dashboard.errands.ver") && panel !== "planeacion";
-  const puedeVerComparativo = usePermiso("dashboard.comparativo.ver") && panel !== "planeacion";
+  const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver");
+  const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver");
+  const puedeVerErrands = usePermiso("dashboard.errands.ver");
+  const puedeVerComparativo = usePermiso("dashboard.comparativo.ver");
   const [vista, setVista] = useState<"ejecucion" | "planeacion" | "run-errands" | "comparativo">("ejecucion");
 
-  // Si la pestaña activa deja de estar permitida (o al cargar el usuario), se
-  // mueve a la primera pestaña a la que sí tenga acceso.
+  // Por defecto viene la pestaña del panel por el que se entró (?panel=...);
+  // si esa (o la que ya estaba activa) deja de estar permitida, se mueve a la
+  // primera pestaña a la que sí tenga acceso.
   useEffect(() => {
     const permitido: Record<typeof vista, boolean> = {
       ejecucion: puedeVerEjecucion, planeacion: puedeVerPlaneacion,
       "run-errands": puedeVerErrands, comparativo: puedeVerComparativo,
     };
+    const preferida = panel === "planeacion" ? "planeacion" : panel === "ejecucion" ? "ejecucion" : null;
+    if (preferida && permitido[preferida]) { setVista(preferida); return; }
     if (permitido[vista]) return;
     const primero = (Object.keys(permitido) as (typeof vista)[]).find((v) => permitido[v]);
     if (primero) setVista(primero);
-  }, [puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [panel, puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo]); // eslint-disable-line react-hooks/exhaustive-deps
   const [resumen, setResumen] = useState<OrdenesResumen | null>(null);
   const [planillas, setPlanillas] = useState<Planilla[]>([]);
   const [novedades, setNovedades] = useState<Novedad[]>([]);
   const [vehiculos, setVehiculos] = useState<VehiculoExterno[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
 
   // ── Rango de fechas para las métricas históricas de la pestaña Ejecución
   // (planillas/novedades). Las métricas de órdenes vivas son estado actual y
@@ -431,13 +437,12 @@ function DashboardPageInner() {
   // El selector de pestañas solo tiene sentido si hay más de una para elegir
   // (p. ej. dentro del panel Ejecución: Ejecución + Run Errands + Comparativo).
   const tabsVisibles = [puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo].filter(Boolean).length;
-  const tituloPanel = panel === "planeacion" ? "Dashboard · Planeación" : panel === "ejecucion" ? "Dashboard · Ejecución" : "Dashboard";
 
   return (
     <div className="flex h-full flex-col overflow-auto p-3 sm:p-4">
       <header className="mb-2.5 flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-[#14352a]">{tituloPanel}</h1>
+          <h1 className="text-2xl font-bold text-[#14352a]">Dashboard</h1>
           <p className="text-sm text-[#5f7a68]">Resumen operativo en tiempo real · Santa Cruz</p>
         </div>
         <div className="flex items-center gap-2">
