@@ -59,6 +59,29 @@ const PERMISOS: [string, string][] = [
   ["distrilog.config.editar", "Crear/editar/eliminar clientes, vehículos, rutas y conductores"],
   // NOTA: el permiso "siglog.ver" de la app original NO se siembra — el
   // módulo SIGLOG fue eliminado en la fusión con DISTRILOG.
+
+  // Permisos granulares nuevos: Dashboard por pestaña, Plantillas TAT como
+  // módulo propio, y Configuración desglosada por catálogo (antes todo bajo
+  // distrilog.config.*). "distrilog.config.*" se deja sembrado (no se borra)
+  // para no romper roles ya asignados; el código ya no lo consulta.
+  ["dashboard.ejecucion.ver", "Ver la pestaña Ejecución del Dashboard"],
+  ["dashboard.planeacion.ver", "Ver la pestaña Planeación del Dashboard"],
+  ["dashboard.errands.ver", "Ver la pestaña Run Errands del Dashboard"],
+  ["dashboard.comparativo.ver", "Ver la pestaña Comparativo del Dashboard"],
+  ["plantillas_tat.ver", "Acceder al módulo Plantillas TAT"],
+  ["plantillas_tat.editar", "Capturar, importar y cruzar plantillas TAT con Siesa"],
+  ["config.clientes.ver", "Ver el catálogo de Clientes"],
+  ["config.clientes.editar", "Crear / editar / eliminar Clientes"],
+  ["config.vehiculos.ver", "Ver el catálogo de Vehículos"],
+  ["config.vehiculos.editar", "Editar capacidad real / cubicaje de Vehículos"],
+  ["config.conductores.ver", "Ver el catálogo de Conductores"],
+  ["config.conductores.editar", "Crear / editar / eliminar Conductores"],
+  ["config.auxiliares.ver", "Ver el catálogo de Auxiliares"],
+  ["config.auxiliares.editar", "Editar el catálogo de Auxiliares"],
+  ["config.rutas.ver", "Ver el catálogo de Rutas"],
+  ["config.rutas.editar", "Editar el catálogo de Rutas"],
+  ["config.plan_nombres.ver", "Ver Nombres de planes"],
+  ["config.plan_nombres.editar", "Editar Nombres de planes"],
 ];
 
 const OPERADOR_CLAVES = [
@@ -67,6 +90,7 @@ const OPERADOR_CLAVES = [
   "areas.ver", "areas.confirmar_carga", "areas.exportar",
   "resumen.ver", "resumen.exportar",
   "horarios.ver", "horarios.editar", "maestros.ver", "dashboard.ver",
+  "dashboard.ejecucion.ver", "dashboard.planeacion.ver", "dashboard.errands.ver",
   "distrilog.ordenes.ver", "distrilog.ordenes.editar",
   "distrilog.asignacion.ver", "distrilog.asignacion.editar",
   "distrilog.planes.ver", "distrilog.planes.editar",
@@ -75,12 +99,19 @@ const OPERADOR_CLAVES = [
   "distrilog.nivel_servicio.ver", "distrilog.nivel_servicio.editar",
   "distrilog.errands.ver", "distrilog.errands.editar",
   "distrilog.config.ver",
+  "plantillas_tat.ver", "plantillas_tat.editar",
+  "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
+  "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
 ];
 
 const CONSULTA_CLAVES = [
   "programacion.ver", "asignacion.ver", "areas.ver",
   "resumen.ver", "horarios.ver", "maestros.ver", "dashboard.ver",
+  "dashboard.ejecucion.ver", "dashboard.planeacion.ver", "dashboard.errands.ver",
   "distrilog.ordenes.ver", "distrilog.historicos.ver", "distrilog.nivel_servicio.ver",
+  "plantillas_tat.ver",
+  "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
+  "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
 ];
 
 async function main() {

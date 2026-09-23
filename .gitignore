@@ -24,3 +24,5 @@ conductores.xlsx
 rutas1.xlsx
 
 backend/output_result.txt
+
+*.tsbuildinfo

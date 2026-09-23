@@ -56,7 +56,7 @@ router.get("/", requireAuth, async (_req, res, next) => {
 });
 
 // POST /api/conductores
-router.post("/", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.post("/", requireAuth, requirePermiso("config.conductores.editar"), async (req, res, next) => {
   try {
     const parsed = conductorSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -80,7 +80,7 @@ router.post("/", requireAuth, requirePermiso("distrilog.config.editar"), async (
 });
 
 // PUT /api/conductores/:id
-router.put("/:id", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.put("/:id", requireAuth, requirePermiso("config.conductores.editar"), async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const parsed = conductorSchema.safeParse(req.body);
@@ -113,7 +113,7 @@ router.put("/:id", requireAuth, requirePermiso("distrilog.config.editar"), async
 });
 
 // PATCH /api/conductores/:id/estado  { activo }
-router.patch("/:id/estado", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.patch("/:id/estado", requireAuth, requirePermiso("config.conductores.editar"), async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const activo = req.body?.activo;
@@ -139,7 +139,7 @@ router.patch("/:id/estado", requireAuth, requirePermiso("distrilog.config.editar
 });
 
 // POST /api/conductores/sync  -> importa conductores desde el endpoint de drivers de Drivin
-router.post("/sync", requireAuth, requirePermiso("distrilog.config.editar"), async (_req, res, next) => {
+router.post("/sync", requireAuth, requirePermiso("config.conductores.editar"), async (_req, res, next) => {
   try {
     if (!env.DRIVIN_API_KEY) throw new HttpError(500, "Falta DRIVIN_API_KEY");
 
@@ -235,7 +235,7 @@ router.post("/sync", requireAuth, requirePermiso("distrilog.config.editar"), asy
 });
 
 // DELETE /api/conductores/:id
-router.delete("/:id", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.delete("/:id", requireAuth, requirePermiso("config.conductores.editar"), async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const current = await prisma.conductor.findUnique({ where: { id } });

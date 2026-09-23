@@ -11,27 +11,68 @@ router.use(requireAuth);
 
 const ROLES_SISTEMA = new Set(["ADMIN"]);
 
-// Catálogo de permisos agrupado por módulo (para la UI de checkboxes).
-export const MODULOS: [string, string[]][] = [
-  ["Planificación", ["programacion.ver", "programacion.editar", "programacion.cerrar_area", "programacion.reabrir_area"]],
-  ["Distribución Producción", ["distribucion.ver", "distribucion.editar"]],
-  ["Simulador de Producción", ["simulador.ver", "simulador.editar"]],
-  ["Preasignación", ["asignacion.ver", "asignacion.editar"]],
-  ["Áreas para Cargar", ["areas.ver", "areas.confirmar_carga", "areas.reabrir_carga", "areas.editar_kls", "areas.exportar"]],
-  ["Resumen del Día", ["resumen.ver", "resumen.exportar"]],
-  ["Maestros", ["maestros.ver", "maestros.editar", "maestros.eliminar"]],
-  ["Dashboard", ["dashboard.ver"]],
-  ["Reportes", ["reportes.ver", "reportes.exportar"]],
-  ["Usuarios y roles", ["usuarios.ver", "usuarios.crear", "usuarios.editar", "usuarios.roles"]],
-  ["Auditoría", ["auditoria.ver"]],
-  ["Ejecución · Cargar Órdenes", ["distrilog.ordenes.ver", "distrilog.ordenes.editar"]],
-  ["Ejecución · Asignación de órdenes", ["distrilog.asignacion.ver", "distrilog.asignacion.editar"]],
-  ["Ejecución · Diagrama", ["distrilog.planes.ver", "distrilog.planes.editar"]],
-  ["Ejecución · Planificación D.L.", ["distrilog.planificacion_dl.ver", "distrilog.planificacion_dl.editar"]],
-  ["Ejecución · Históricos", ["distrilog.historicos.ver"]],
-  ["Ejecución · Nivel de servicio", ["distrilog.nivel_servicio.ver", "distrilog.nivel_servicio.editar"]],
-  ["Ejecución · Run Errands", ["distrilog.errands.ver", "distrilog.errands.editar"]],
-  ["Ejecución · Configuración", ["distrilog.config.ver", "distrilog.config.editar"]],
+// Catálogo de permisos agrupado por módulo y submódulo (para la UI de
+// checkboxes de Roles y permisos): cada módulo de primer nivel (Planeación,
+// Ejecución, Plantillas TAT, Configuración, Dashboard) agrupa submódulos, y
+// cada submódulo trae sus claves de permiso. Permite marcar/desmarcar un
+// módulo entero o cada submódulo por separado.
+export interface SubModulo { label: string; claves: string[] }
+export interface ModuloGrupo { label: string; submodulos: SubModulo[] }
+
+export const MODULOS: ModuloGrupo[] = [
+  {
+    label: "Planeación",
+    submodulos: [
+      { label: "Planificación", claves: ["programacion.ver", "programacion.editar", "programacion.cerrar_area", "programacion.reabrir_area"] },
+      { label: "Distribución Producción", claves: ["distribucion.ver", "distribucion.editar"] },
+      { label: "Simulador de Producción", claves: ["simulador.ver", "simulador.editar"] },
+      { label: "Preasignación", claves: ["asignacion.ver", "asignacion.editar"] },
+      { label: "Áreas para Cargar", claves: ["areas.ver", "areas.confirmar_carga", "areas.reabrir_carga", "areas.editar_kls", "areas.exportar"] },
+      { label: "Resumen del Día", claves: ["resumen.ver", "resumen.exportar"] },
+      { label: "Maestros", claves: ["maestros.ver", "maestros.editar", "maestros.eliminar"] },
+      { label: "Reportes", claves: ["reportes.ver", "reportes.exportar"] },
+    ],
+  },
+  {
+    label: "Ejecución",
+    submodulos: [
+      { label: "Cargar Órdenes", claves: ["distrilog.ordenes.ver", "distrilog.ordenes.editar"] },
+      { label: "Asignación de órdenes", claves: ["distrilog.asignacion.ver", "distrilog.asignacion.editar"] },
+      { label: "Diagrama", claves: ["distrilog.planes.ver", "distrilog.planes.editar"] },
+      { label: "Planificación D.L.", claves: ["distrilog.planificacion_dl.ver", "distrilog.planificacion_dl.editar"] },
+      { label: "Históricos", claves: ["distrilog.historicos.ver"] },
+      { label: "Nivel de servicio", claves: ["distrilog.nivel_servicio.ver", "distrilog.nivel_servicio.editar"] },
+      { label: "Run Errands", claves: ["distrilog.errands.ver", "distrilog.errands.editar"] },
+    ],
+  },
+  {
+    label: "Plantillas TAT",
+    submodulos: [
+      { label: "Plantillas TAT (Agropecuaria e Inversiones)", claves: ["plantillas_tat.ver", "plantillas_tat.editar"] },
+    ],
+  },
+  {
+    label: "Configuración",
+    submodulos: [
+      { label: "Usuarios y roles", claves: ["usuarios.ver", "usuarios.crear", "usuarios.editar", "usuarios.roles"] },
+      { label: "Auditoría", claves: ["auditoria.ver"] },
+      { label: "Clientes", claves: ["config.clientes.ver", "config.clientes.editar"] },
+      { label: "Vehículos", claves: ["config.vehiculos.ver", "config.vehiculos.editar"] },
+      { label: "Conductores", claves: ["config.conductores.ver", "config.conductores.editar"] },
+      { label: "Auxiliares", claves: ["config.auxiliares.ver", "config.auxiliares.editar"] },
+      { label: "Rutas", claves: ["config.rutas.ver", "config.rutas.editar"] },
+      { label: "Nombres de planes", claves: ["config.plan_nombres.ver", "config.plan_nombres.editar"] },
+    ],
+  },
+  {
+    label: "Dashboard",
+    submodulos: [
+      { label: "Ejecución", claves: ["dashboard.ejecucion.ver"] },
+      { label: "Planeación", claves: ["dashboard.planeacion.ver"] },
+      { label: "Run Errands", claves: ["dashboard.errands.ver"] },
+      { label: "Comparativo", claves: ["dashboard.comparativo.ver"] },
+    ],
+  },
 ];
 
 // GET /api/planeacion/roles

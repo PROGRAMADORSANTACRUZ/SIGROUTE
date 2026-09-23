@@ -6,6 +6,9 @@ import * as XLSX from "xlsx";
 import PageHeader from "@/components/PageHeader";
 import { IconDownload, IconTrash, IconUpload } from "@/components/icons";
 import { useToast } from "@/components/ui/ToastProvider";
+import { usePermiso } from "@/lib/permisos";
+import SoloLecturaBadge from "@/components/SoloLecturaBadge";
+import EmptyState from "@/components/EmptyState";
 import {
   getAuxiliares, getClientes, getConductores, getRutas, getVehiculosExternos,
   type Auxiliar, type Cliente, type Conductor, type Ruta, type VehiculoExterno,
@@ -168,6 +171,8 @@ const ESTADO_LABEL: Record<EstadoFila, string> = {
 };
 
 export default function PlantillaTatEditor({ origen, titulo, subtitulo }: { origen: Origen; titulo: string; subtitulo: string }) {
+  const puedeVer = usePermiso("plantillas_tat.ver");
+  const puedeEditar = usePermiso("plantillas_tat.editar");
   const [filas, setFilas] = useState<FilaEdit[]>(() => filasVacias());
   const [guardando, setGuardando] = useState(false);
   const [cargandoBorrador, setCargandoBorrador] = useState(true);
@@ -439,12 +444,22 @@ export default function PlantillaTatEditor({ origen, titulo, subtitulo }: { orig
 
   return (
     <div className="p-6">
+      {!puedeVer ? (
+        <>
+          <PageHeader icon={IconUpload} title={titulo} subtitle={subtitulo} />
+          <div className="rounded-2xl border border-[#e1e9dd] bg-white">
+            <EmptyState icon={IconUpload} title="Sin acceso" description="No tienes permiso para ver este módulo." />
+          </div>
+        </>
+      ) : (
+      <>
       <PageHeader
         icon={IconUpload}
         title={titulo}
         subtitle={subtitulo}
         actions={
           <div className="flex items-center gap-2">
+            {!puedeEditar && <SoloLecturaBadge />}
             <button onClick={copiarTodo} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
               Copiar tabla
@@ -455,10 +470,12 @@ export default function PlantillaTatEditor({ origen, titulo, subtitulo }: { orig
             >
               {IconDownload} Descargar Excel
             </button>
+            {puedeEditar && (
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-[#2f8f4e] bg-[#e8f3e2] px-4 py-2.5 text-sm font-medium text-[#2f8f4e] hover:bg-[#dcedd3]">
               {IconUpload} Subir Excel
               <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" />
             </label>
+            )}
           </div>
         }
       />
@@ -467,6 +484,7 @@ export default function PlantillaTatEditor({ origen, titulo, subtitulo }: { orig
         Puedes seleccionar y pegar (Ctrl+V) un bloque de celdas copiado directamente de tu Excel, o arrastrar el mouse sobre varias celdas y copiarlas (Ctrl+C) para pegarlas en Excel o en otra parte de la tabla — las columnas están en el mismo orden que la plantilla. Al escribir la fecha y la factura, se autorellenan los datos que vienen de la remisión en Siesa.
       </p>
 
+      <fieldset disabled={!puedeEditar} className="contents">
       <div className="mb-3 flex items-center gap-2">
         <button onClick={guardar} disabled={guardando} className="ml-auto rounded-lg bg-[#2f8f4e] px-4 py-2 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60">
           {guardando ? "Procesando…" : "Guardar y cruzar con Siesa"}
@@ -564,6 +582,9 @@ export default function PlantillaTatEditor({ origen, titulo, subtitulo }: { orig
           </tfoot>
         </table>
       </div>
+      )}
+      </fieldset>
+      </>
       )}
     </div>
   );

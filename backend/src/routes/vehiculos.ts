@@ -166,7 +166,7 @@ const capacidadRealSchema = z.object({
     }),
 });
 
-router.patch("/capacidad-real", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.patch("/capacidad-real", requireAuth, requirePermiso("config.vehiculos.editar"), async (req, res, next) => {
   try {
     const parsed = capacidadRealSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -189,7 +189,7 @@ router.patch("/capacidad-real", requireAuth, requirePermiso("distrilog.config.ed
 });
 
 // POST /api/vehiculos
-router.post("/", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.post("/", requireAuth, requirePermiso("config.vehiculos.editar"), async (req, res, next) => {
   try {
     const parsed = vehiculoSchema.safeParse(req.body);
     if (!parsed.success) {

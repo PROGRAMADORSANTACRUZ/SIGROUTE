@@ -39,7 +39,8 @@ export const setColumnasUsuario = (id: number, items: { area: string; ver: boole
   req(`/usuarios/${id}/columnas`, { method: "PUT", body: JSON.stringify(items) });
 
 export const getRoles = () => req<Record<string, unknown>[]>("/roles");
-export const getRolesModulos = () => req<{ modulos: [string, string[]][]; areas: string[] }>("/roles/modulos");
+export const getRolesModulos = () =>
+  req<{ modulos: { label: string; submodulos: { label: string; claves: string[] }[] }[]; areas: string[] }>("/roles/modulos");
 export const getRolPermisos = (id: number) => req<string[]>(`/roles/${id}/permisos`);
 export const crearRol = (data: Record<string, unknown>) => req("/roles", { method: "POST", body: JSON.stringify(data) });
 export const editarRol = (id: number, data: Record<string, unknown>) => req(`/roles/${id}`, { method: "PUT", body: JSON.stringify(data) });

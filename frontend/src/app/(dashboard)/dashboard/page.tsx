@@ -7,7 +7,6 @@ import {
   getNovedades,
   getPlanillas,
   getResumen,
-  getUser,
   getVehiculosExternos,
   type Novedad,
   type OrdenesResumen,
@@ -19,6 +18,7 @@ import { getErrandsDashboard, type ErrandsDashboard } from "@/lib/errandsApi";
 import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
 import { IconRuta } from "@/components/icons";
+import { usePermiso } from "@/lib/permisos";
 
 // -"€-"€ Formatters -"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€
 const fmtKg = (n: number) => n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
@@ -185,8 +185,23 @@ interface ResumenPlan {
 }
 
 export default function DashboardPage() {
+  const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver");
+  const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver");
+  const puedeVerErrands = usePermiso("dashboard.errands.ver");
+  const puedeVerComparativo = usePermiso("dashboard.comparativo.ver");
   const [vista, setVista] = useState<"ejecucion" | "planeacion" | "run-errands" | "comparativo">("ejecucion");
-  const esAdmin = getUser()?.role === "ADMIN";
+
+  // Si la pestaña activa deja de estar permitida (o al cargar el usuario), se
+  // mueve a la primera pestaña a la que sí tenga acceso.
+  useEffect(() => {
+    const permitido: Record<typeof vista, boolean> = {
+      ejecucion: puedeVerEjecucion, planeacion: puedeVerPlaneacion,
+      "run-errands": puedeVerErrands, comparativo: puedeVerComparativo,
+    };
+    if (permitido[vista]) return;
+    const primero = (Object.keys(permitido) as (typeof vista)[]).find((v) => permitido[v]);
+    if (primero) setVista(primero);
+  }, [puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo]); // eslint-disable-line react-hooks/exhaustive-deps
   const [resumen, setResumen] = useState<OrdenesResumen | null>(null);
   const [planillas, setPlanillas] = useState<Planilla[]>([]);
   const [novedades, setNovedades] = useState<Novedad[]>([]);
@@ -408,25 +423,31 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-0.5 rounded-lg border border-[#dfe4e0] bg-white p-0.5">
-            <button
-              onClick={() => setVista("ejecucion")}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "ejecucion" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
-            >
-              Ejecución
-            </button>
-            <button
-              onClick={() => setVista("planeacion")}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "planeacion" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
-            >
-              Planeación
-            </button>
-            <button
-              onClick={() => setVista("run-errands")}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "run-errands" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
-            >
-              Run Errands
-            </button>
-            {esAdmin && (
+            {puedeVerEjecucion && (
+              <button
+                onClick={() => setVista("ejecucion")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "ejecucion" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
+              >
+                Ejecución
+              </button>
+            )}
+            {puedeVerPlaneacion && (
+              <button
+                onClick={() => setVista("planeacion")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "planeacion" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
+              >
+                Planeación
+              </button>
+            )}
+            {puedeVerErrands && (
+              <button
+                onClick={() => setVista("run-errands")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "run-errands" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
+              >
+                Run Errands
+              </button>
+            )}
+            {puedeVerComparativo && (
               <button
                 onClick={() => setVista("comparativo")}
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "comparativo" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}

@@ -329,7 +329,7 @@ router.get("/", requireAuth, async (_req, res, next) => {
 });
 
 // POST /api/clientes/auto-consecutivos  -> cruza y asigna consecutivos en lote
-router.post("/auto-consecutivos", requireAuth, requirePermiso("distrilog.config.editar"), async (_req, res, next) => {
+router.post("/auto-consecutivos", requireAuth, requirePermiso("config.clientes.editar"), async (_req, res, next) => {
   try {
     const result = await asignarConsecutivosAuto();
     res.json(result);
@@ -339,7 +339,7 @@ router.post("/auto-consecutivos", requireAuth, requirePermiso("distrilog.config.
 });
 
 // POST /api/clientes  -> crea un cliente individual (desde el flujo de órdenes)
-router.post("/", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.post("/", requireAuth, requirePermiso("config.clientes.editar"), async (req, res, next) => {
   try {
     const body = req.body ?? {};
     const data: Record<string, string | boolean | null> = {};
@@ -365,7 +365,7 @@ router.post("/", requireAuth, requirePermiso("distrilog.config.editar"), async (
 });
 
 // POST /api/clientes/:id/consecutivo  -> asigna un consecutivo a un cliente existente
-router.post("/:id/consecutivo", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.post("/:id/consecutivo", requireAuth, requirePermiso("config.clientes.editar"), async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const nuevo = String(req.body?.consecutivo ?? "").trim();
@@ -413,7 +413,7 @@ router.post("/:id/consecutivo", requireAuth, requirePermiso("distrilog.config.ed
 router.post(
   "/import",
   requireAuth,
-  requirePermiso("distrilog.config.editar"),
+  requirePermiso("config.clientes.editar"),
   upload.single("file"),
   async (req, res, next) => {
     try {
@@ -589,7 +589,7 @@ router.get("/export", requireAuth, async (_req, res, next) => {
 });
 
 // PUT /api/clientes/:id  -> actualiza los campos editables
-router.put("/:id", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.put("/:id", requireAuth, requirePermiso("config.clientes.editar"), async (req, res, next) => {
   try {
     const id = String(req.params.id);
     const body = req.body ?? {};
@@ -631,7 +631,7 @@ router.put("/:id", requireAuth, requirePermiso("distrilog.config.editar"), async
 });
 
 // DELETE /api/clientes  -> borra TODO el maestro de clientes (solo administradores)
-router.delete("/", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.delete("/", requireAuth, requirePermiso("config.clientes.editar"), async (req, res, next) => {
   try {
     if (req.user?.role !== "ADMIN" && req.user?.role !== "DEVELOPER") {
       throw new HttpError(403, "Eliminar todos los clientes requiere rol administrador");

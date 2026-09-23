@@ -1609,7 +1609,7 @@ interface FilaPlantillaTat {
 
 // GET /api/ordenes/tat-plantilla/formato?origen=AGROPECUARIA|INVERSIONES
 // Descarga el Excel vacío (solo encabezados) para diligenciar a mano.
-router.get("/tat-plantilla/formato", requireAuth, requirePermiso("distrilog.ordenes.editar"), (req, res, next) => {
+router.get("/tat-plantilla/formato", requireAuth, requirePermiso("plantillas_tat.ver"), (req, res, next) => {
   try {
     const origen = String(req.query.origen ?? "AGROPECUARIA").toUpperCase();
     const columnas = PLANTILLA_COLUMNAS[origen];
@@ -1679,7 +1679,7 @@ async function procesarFilasPlantillaTat(origen: string, filas: FilaPlantillaTat
 }
 
 // POST /api/ordenes/tat-plantilla  -> captura manual (grilla). body: { origen, filas: FilaPlantillaTat[] }
-router.post("/tat-plantilla", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
+router.post("/tat-plantilla", requireAuth, requirePermiso("plantillas_tat.editar"), async (req, res, next) => {
   try {
     const origen = String(req.body?.origen ?? "AGROPECUARIA").toUpperCase();
     if (!PLANTILLA_COLUMNAS[origen]) throw new HttpError(400, "Origen inválido (AGROPECUARIA o INVERSIONES)");
@@ -1692,7 +1692,7 @@ router.post("/tat-plantilla", requireAuth, requirePermiso("distrilog.ordenes.edi
 });
 
 // POST /api/ordenes/tat-plantilla/importar  -> sube el Excel ya diligenciado.
-router.post("/tat-plantilla/importar", requireAuth, requirePermiso("distrilog.ordenes.editar"), upload.single("file"), async (req, res, next) => {
+router.post("/tat-plantilla/importar", requireAuth, requirePermiso("plantillas_tat.editar"), upload.single("file"), async (req, res, next) => {
   try {
     const origen = String(req.body?.origen ?? "AGROPECUARIA").toUpperCase();
     const columnas = PLANTILLA_COLUMNAS[origen];
@@ -1737,7 +1737,7 @@ router.post("/tat-plantilla/importar", requireAuth, requirePermiso("distrilog.or
 // GET /api/ordenes/tat-plantilla/borrador?origen=  -> filas de la grilla EN BD
 // para la jornada vigente (6pm a 6pm, hora Colombia). Reemplaza el uso de
 // localStorage: cualquier usuario que abra la página ve el mismo avance.
-router.get("/tat-plantilla/borrador", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
+router.get("/tat-plantilla/borrador", requireAuth, requirePermiso("plantillas_tat.ver"), async (req, res, next) => {
   try {
     const origen = String(req.query.origen ?? "AGROPECUARIA").toUpperCase();
     if (!PLANTILLA_COLUMNAS[origen]) throw new HttpError(400, "Origen inválido (AGROPECUARIA o INVERSIONES)");
@@ -1752,7 +1752,7 @@ router.get("/tat-plantilla/borrador", requireAuth, requirePermiso("distrilog.ord
 // PUT /api/ordenes/tat-plantilla/borrador  body: { origen, filas: unknown[] }
 // Autoguardado de TODA la grilla (reemplaza el borrador de la jornada vigente
 // completo) — cada fila se guarda tal cual, completa o no.
-router.put("/tat-plantilla/borrador", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
+router.put("/tat-plantilla/borrador", requireAuth, requirePermiso("plantillas_tat.editar"), async (req, res, next) => {
   try {
     const origen = String(req.body?.origen ?? "AGROPECUARIA").toUpperCase();
     if (!PLANTILLA_COLUMNAS[origen]) throw new HttpError(400, "Origen inválido (AGROPECUARIA o INVERSIONES)");
@@ -1773,7 +1773,7 @@ router.put("/tat-plantilla/borrador", requireAuth, requirePermiso("distrilog.ord
 });
 
 // GET /api/ordenes/tat-plantilla?origen=&estado=  -> registros ya capturados (auditoría)
-router.get("/tat-plantilla", requireAuth, requirePermiso("distrilog.ordenes.ver"), async (req, res, next) => {
+router.get("/tat-plantilla", requireAuth, requirePermiso("plantillas_tat.ver"), async (req, res, next) => {
   try {
     const where: Record<string, unknown> = {};
     if (req.query.origen) where.origen = String(req.query.origen).toUpperCase();

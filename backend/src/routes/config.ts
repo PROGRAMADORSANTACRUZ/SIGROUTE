@@ -30,7 +30,7 @@ router.get("/auxiliares", requireAuth, async (_req, res, next) => {
 });
 
 // Reemplaza toda la lista de auxiliares con la enviada.
-router.put("/auxiliares", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.put("/auxiliares", requireAuth, requirePermiso("config.auxiliares.editar"), async (req, res, next) => {
   try {
     const parsed = z.array(auxiliarSchema).safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, "Datos de auxiliares inválidos");
@@ -75,7 +75,7 @@ router.get("/rutas", requireAuth, async (_req, res, next) => {
   }
 });
 
-router.put("/rutas", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.put("/rutas", requireAuth, requirePermiso("config.rutas.editar"), async (req, res, next) => {
   try {
     const parsed = z.array(rutaSchema).safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, "Datos de rutas inválidos");
@@ -116,7 +116,7 @@ router.get("/plan-nombres", requireAuth, async (_req, res, next) => {
   }
 });
 
-router.put("/plan-nombres", requireAuth, requirePermiso("distrilog.config.editar"), async (req, res, next) => {
+router.put("/plan-nombres", requireAuth, requirePermiso("config.plan_nombres.editar"), async (req, res, next) => {
   try {
     const parsed = z.array(planNombreSchema).safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, "Datos de nombres de planes inválidos");

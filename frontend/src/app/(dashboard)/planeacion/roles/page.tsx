@@ -39,9 +39,12 @@ function permisoLabel(clave: string): string {
   return ACCION_LABELS[accion] ?? accion.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
+interface SubModulo { label: string; claves: string[] }
+interface ModuloGrupo { label: string; submodulos: SubModulo[] }
+
 export default function RolesPage() {
   const [roles, setRoles] = useState<RolRow[]>([]);
-  const [modulos, setModulos] = useState<[string, string[]][]>([]);
+  const [modulos, setModulos] = useState<ModuloGrupo[]>([]);
   const [areas, setAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -63,7 +66,7 @@ export default function RolesPage() {
     Promise.all([getRoles(), getRolesModulos()])
       .then(([r, m]) => {
         setRoles(r as unknown as RolRow[]);
-        const data = m as { modulos: [string, string[]][]; areas: string[] };
+        const data = m as { modulos: ModuloGrupo[]; areas: string[] };
         setModulos(data.modulos);
         setAreas(data.areas);
       })
@@ -142,11 +145,19 @@ export default function RolesPage() {
   }
 
   const modulosFiltrados = modulos
-    .map(([grupo, keys]) => [grupo, keys.filter((k) => {
-      const q = busquedaPermiso.trim().toLowerCase();
-      return !q || k.toLowerCase().includes(q) || permisoLabel(k).toLowerCase().includes(q) || grupo.toLowerCase().includes(q);
-    })] as [string, string[]])
-    .filter(([, keys]) => keys.length > 0);
+    .map((mod) => ({
+      label: mod.label,
+      submodulos: mod.submodulos
+        .map((sm) => ({
+          label: sm.label,
+          claves: sm.claves.filter((k) => {
+            const q = busquedaPermiso.trim().toLowerCase();
+            return !q || k.toLowerCase().includes(q) || permisoLabel(k).toLowerCase().includes(q) || sm.label.toLowerCase().includes(q) || mod.label.toLowerCase().includes(q);
+          }),
+        }))
+        .filter((sm) => sm.claves.length > 0),
+    }))
+    .filter((mod) => mod.submodulos.length > 0);
 
   return (
     <div className="p-6">
@@ -264,37 +275,57 @@ export default function RolesPage() {
 
                 <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
                   {error && <p className="mb-3 text-sm text-[#b3261e]">{error}</p>}
-                  <div className="space-y-4">
-                    {modulosFiltrados.map(([grupo, keys]) => {
-                      const marcados = keys.filter((k) => claves.has(k)).length;
-                      const todos = marcados === keys.length;
+                  <div className="space-y-5">
+                    {modulosFiltrados.map((mod) => {
+                      const clavesModulo = mod.submodulos.flatMap((sm) => sm.claves);
+                      const marcadosModulo = clavesModulo.filter((k) => claves.has(k)).length;
+                      const todoModulo = marcadosModulo === clavesModulo.length;
                       return (
-                        <div key={grupo} className="rounded-xl border border-[#e1e9dd] p-3">
-                          <div className="mb-2 flex items-center justify-between">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-[#7a8794]">{grupo}</p>
+                        <div key={mod.label} className="rounded-xl border border-[#c8d6cd] bg-[#f7faf5] p-3">
+                          <div className="mb-3 flex items-center justify-between">
+                            <p className="text-sm font-bold text-[#14352a]">{mod.label}</p>
                             <button
-                              onClick={() => toggleGrupo(keys, !todos)}
-                              className="text-[11px] font-medium text-[#2f8f4e] hover:underline"
+                              onClick={() => toggleGrupo(clavesModulo, !todoModulo)}
+                              className="text-[11px] font-semibold text-[#2f8f4e] hover:underline"
                             >
-                              {todos ? "Desmarcar todos" : `Marcar todos (${marcados}/${keys.length})`}
+                              {todoModulo ? "Desmarcar módulo" : `Marcar todo el módulo (${marcadosModulo}/${clavesModulo.length})`}
                             </button>
                           </div>
-                          <div className="flex flex-wrap gap-2">
-                            {keys.map((k) => {
-                              const activo = claves.has(k);
+                          <div className="space-y-3">
+                            {mod.submodulos.map((sm) => {
+                              const marcados = sm.claves.filter((k) => claves.has(k)).length;
+                              const todos = marcados === sm.claves.length;
                               return (
-                                <button
-                                  key={k}
-                                  onClick={() => toggle(k)}
-                                  title={k}
-                                  className={`rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
-                                    activo
-                                      ? "border-[#2f8f4e] bg-[#e8f3e2] text-[#2f8f4e]"
-                                      : "border-[#dfe4e0] bg-white text-[#5f7a68] hover:bg-[#f4f6f3]"
-                                  }`}
-                                >
-                                  {permisoLabel(k)}
-                                </button>
+                                <div key={sm.label} className="rounded-lg border border-[#e1e9dd] bg-white p-3">
+                                  <div className="mb-2 flex items-center justify-between">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-[#7a8794]">{sm.label}</p>
+                                    <button
+                                      onClick={() => toggleGrupo(sm.claves, !todos)}
+                                      className="text-[11px] font-medium text-[#2f8f4e] hover:underline"
+                                    >
+                                      {todos ? "Desmarcar todos" : `Marcar todos (${marcados}/${sm.claves.length})`}
+                                    </button>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {sm.claves.map((k) => {
+                                      const activo = claves.has(k);
+                                      return (
+                                        <button
+                                          key={k}
+                                          onClick={() => toggle(k)}
+                                          title={k}
+                                          className={`rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
+                                            activo
+                                              ? "border-[#2f8f4e] bg-[#e8f3e2] text-[#2f8f4e]"
+                                              : "border-[#dfe4e0] bg-white text-[#5f7a68] hover:bg-[#f4f6f3]"
+                                          }`}
+                                        >
+                                          {permisoLabel(k)}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               );
                             })}
                           </div>
