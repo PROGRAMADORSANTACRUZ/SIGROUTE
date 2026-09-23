@@ -707,6 +707,9 @@ model ErrandsPedido {
   drivinEstadoEntrega String?   @map("drivin_estado_entrega") @db.VarChar(30)
   drivinMotivoEntrega String?   @map("drivin_motivo_entrega")
   drivinSyncAt        DateTime? @map("drivin_sync_at")
+  // Esquema real de Drivin (uno de los de PDV) usado al enviar la orden; se
+  // reutiliza en un reintento en vez de volver a auto-emparejar por PDV.
+  drivinSchemaName    String?   @map("drivin_schema_name") @db.VarChar(100)
 
   cliente      ErrandsCliente       @relation(fields: [clienteId], references: [id])
   puntoVenta   ErrandsPuntoVenta?   @relation(fields: [puntoVentaId], references: [id])

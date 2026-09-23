@@ -76,6 +76,12 @@ export interface ErrandsPedido {
   drivinEstadoEntrega: string | null;
   drivinMotivoEntrega: string | null;
   drivinSyncAt: string | null;
+  drivinSchemaName: string | null;
+}
+
+export interface ErrandsDrivinEsquema {
+  code: string;
+  name: string;
 }
 
 // ── Puntos de Venta ─────────────────────────────────────────────────────
@@ -171,6 +177,7 @@ export const getErrandsPedidos = (params?: { estado?: string; desde?: string; ha
   return req<ErrandsPedido[]>(`/pedidos${suffix}`);
 };
 export const getErrandsPedidoNextNumero = () => req<{ numeroPedido: string }>("/pedidos-next-numero");
+export const getErrandsDrivinEsquemas = () => req<ErrandsDrivinEsquema[]>("/drivin-esquemas");
 export interface ErrandsPedidoInput {
   clienteId: number;
   puntoVentaId?: number | null;
@@ -178,6 +185,8 @@ export interface ErrandsPedidoInput {
   kilos?: number;
   estado?: ErrandsPedido["estado"];
   observaciones?: string;
+  // Esquema Drivin elegido a mano; si se omite el backend lo autodetecta por el PDV.
+  schemaName?: string;
 }
 export const crearErrandsPedido = (data: ErrandsPedidoInput) => req<ErrandsPedido>("/pedidos", { method: "POST", body: JSON.stringify(data) });
 export const crearErrandsPedidosLote = (pedidos: ErrandsPedidoInput[]) =>

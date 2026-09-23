@@ -21,18 +21,19 @@ export interface DrivinPedidoInput {
   numeroPedido: string;
   kilos: number;
   fecha: string; // yyyy-mm-dd
+  schemaName: string;
 }
 
 function habilitado(): boolean {
-  return Boolean(env.DRIVIN_API_KEY);
+  return Boolean(env.DRIVIN_ERRANDS_API_KEY);
 }
 
 async function llamarDrivin(path: string, body: unknown): Promise<{ ok: boolean; mensaje?: string }> {
-  if (!habilitado()) return { ok: false, mensaje: "DRIVIN_API_KEY no configurada" };
+  if (!habilitado()) return { ok: false, mensaje: "DRIVIN_ERRANDS_API_KEY no configurada" };
   try {
     const resp = await fetch(`${env.DRIVIN_API_URL}${path}`, {
       method: "POST",
-      headers: { "X-API-Key": env.DRIVIN_API_KEY!, "Content-Type": "application/json" },
+      headers: { "X-API-Key": env.DRIVIN_ERRANDS_API_KEY!, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
@@ -69,6 +70,8 @@ export async function sincronizarClienteDrivin(c: DrivinClienteInput): Promise<{
 }
 
 // Crea el pedido como una orden real en Drivin (1 cliente, 1 orden, 1 tramo).
+// schemaName = esquema real de Drivin (uno de los 14 de PDV) elegido por PDV
+// o manualmente; ver listarEsquemasDrivin().
 export async function crearPedidoDrivin(p: DrivinPedidoInput): Promise<{ ok: boolean; mensaje?: string }> {
   return llamarDrivin("/v2/multipleleg", {
     clients: [{
@@ -78,10 +81,32 @@ export async function crearPedidoDrivin(p: DrivinPedidoInput): Promise<{ ok: boo
         units_1: p.kilos,
         delivery_date: p.fecha,
         items: [{ code: "RUN-ERRANDS", description: "Run Errands", units: 1, units_1: p.kilos }],
-        legs: [{ schema_name: env.DRIVIN_SCHEMA_NAME, address_code: p.clienteCodigo, departure_date: p.fecha, service_time: 10 }],
+        legs: [{ schema_name: p.schemaName, address_code: p.clienteCodigo, departure_date: p.fecha, service_time: 10 }],
       }],
     }],
   });
+}
+
+export interface DrivinEsquema { code: string; name: string }
+
+// Lista los esquemas reales configurados en la organización Drivin de Run
+// Errands (GET /v2/schemas) — se usan para el selector del modal de pedido y
+// para el auto-match por punto de venta.
+export async function listarEsquemasDrivin(): Promise<DrivinEsquema[]> {
+  if (!habilitado()) return [];
+  try {
+    const resp = await fetch(`${env.DRIVIN_API_URL}/v2/schemas`, {
+      headers: { "X-API-Key": env.DRIVIN_ERRANDS_API_KEY! },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return [];
+    const json = (await resp.json()) as { response?: { code?: string; name?: string }[] };
+    return (json.response ?? [])
+      .filter((s): s is { code: string; name: string } => Boolean(s.code && s.name))
+      .map((s) => ({ code: s.code, name: s.name }));
+  } catch {
+    return [];
+  }
 }
 
 export interface DrivinPodInfo { status: string; reason: string | null }
@@ -95,7 +120,7 @@ export async function consultarPodsDrivin(desdeISO: string, hastaISO: string): P
   if (!habilitado()) return map;
   try {
     const resp = await fetch(`${env.DRIVIN_API_URL}/v3/pods?start_date=${desdeISO}&end_date=${hastaISO}`, {
-      headers: { "X-API-Key": env.DRIVIN_API_KEY! },
+      headers: { "X-API-Key": env.DRIVIN_ERRANDS_API_KEY! },
       signal: AbortSignal.timeout(15000),
     });
     if (!resp.ok) return map;

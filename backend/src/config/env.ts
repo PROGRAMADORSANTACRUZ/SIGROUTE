@@ -19,6 +19,12 @@ const envSchema = z.object({
     .string()
     .default("https://external.driv.in/api/external"),
   DRIVIN_API_KEY: z.string().optional(),
+  // Org Drivin DISTINTA ("CO - Santacruz Domicilios", id 10004169): confirmado
+  // 2026-09-23 con soporte de Drivin que son 2 organizaciones separadas (la de
+  // arriba es la de distribución/flota de camiones; esta es la de los 14
+  // esquemas de PDV y la flota de motos/domiciliarios) — no se pueden unificar
+  // en una sola API key, así que Run Errands usa esta y nada más la usa.
+  DRIVIN_ERRANDS_API_KEY: z.string().optional(),
   // Token de apiconsulta (mismo que PRICE_LISTS_TOKEN de SIGCOM). Se envía como ?token=
   CLIENTES_TAT_TOKEN: z.string().optional(),
   TAT_INVOICES_URL: z

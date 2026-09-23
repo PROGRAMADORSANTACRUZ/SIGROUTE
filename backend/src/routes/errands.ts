@@ -9,7 +9,7 @@ import * as XLSX from "xlsx";
 import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
-import { sincronizarClienteDrivin, crearPedidoDrivin, consultarPodsDrivin } from "../lib/drivin";
+import { sincronizarClienteDrivin, crearPedidoDrivin, consultarPodsDrivin, listarEsquemasDrivin } from "../lib/drivin";
 import { env } from "../config/env";
 
 const router = Router();
@@ -87,6 +87,14 @@ function normalizarPdvNombre(s: string): string {
     .replace(/carnes\s+santacruz/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Empareja el nombre de un PDV con el esquema real de Drivin del mismo punto
+// de venta (p. ej. "Carnes Santacruz La 93" <-> "PDV La 93 Carnes Santacruz").
+// Null si Drivin no tiene un esquema para ese PDV (aún, o falta crearlo allá).
+function emparejarEsquemaDrivin(pdvNombre: string, esquemas: { code: string; name: string }[]): string | null {
+  const objetivo = normalizarPdvNombre(pdvNombre);
+  return esquemas.find((e) => normalizarPdvNombre(e.name) === objetivo)?.name ?? null;
 }
 
 router.get("/domiciliarios", async (req, res, next) => {
@@ -445,6 +453,15 @@ router.get("/pedidos/:id", async (req, res, next) => {
 
 const ESTADOS_PEDIDO = ["PENDIENTE", "EN_PROCESO", "ENTREGADO", "CANCELADO", "EDITADO", "REVISADO"] as const;
 
+// Esquemas reales de Drivin (org de Run Errands) para el selector del modal.
+router.get("/drivin-esquemas", async (_req, res, next) => {
+  try {
+    res.json(await listarEsquemasDrivin());
+  } catch (err) {
+    next(err);
+  }
+});
+
 const pedidoSchema = z.object({
   clienteId: z.number(),
   puntoVentaId: z.number().nullable().optional(),
@@ -452,19 +469,31 @@ const pedidoSchema = z.object({
   kilos: z.number().optional(),
   estado: z.enum(ESTADOS_PEDIDO).optional(),
   observaciones: z.string().trim().optional(),
+  // Esquema Drivin elegido a mano; si se omite se autodetecta por el PDV.
+  schemaName: z.string().trim().optional(),
 });
 
 // Sincroniza primero la dirección del cliente en el Maestro de Drivin (por si
 // nunca se sincronizó, p. ej. clientes de carga masiva) y luego crea el
 // pedido como orden allá. Guarda el resultado (éxito/error) en el pedido para
 // que quede visible en la tabla en vez de perderse en silencio.
-async function enviarPedidoADrivin(pedido: {
-  id: number; numeroPedido: string; kilos: number; fecha: Date;
-  cliente: {
-    codigo: string; nombre: string; direccion: string | null; barrio: string | null;
-    ciudad: string | null; region: string | null; telefono: string | null; email: string | null;
-  };
-}) {
+async function enviarPedidoADrivin(
+  pedido: {
+    id: number; numeroPedido: string; kilos: number; fecha: Date;
+    cliente: {
+      codigo: string; nombre: string; direccion: string | null; barrio: string | null;
+      ciudad: string | null; region: string | null; telefono: string | null; email: string | null;
+    };
+  },
+  schemaName: string | null
+) {
+  if (!schemaName) {
+    return prisma.errandsPedido.update({
+      where: { id: pedido.id },
+      data: { drivinEstadoEnvio: "ERROR", drivinMensajeEnvio: "No se encontró un esquema de Drivin para este PDV; elige uno manualmente e inténtalo de nuevo." },
+      include: { cliente: true, puntoVenta: true, domiciliario: true },
+    });
+  }
   await sincronizarClienteDrivin({
     codigo: pedido.cliente.codigo, nombre: pedido.cliente.nombre, direccion: pedido.cliente.direccion,
     barrio: pedido.cliente.barrio, ciudad: pedido.cliente.ciudad, region: pedido.cliente.region,
@@ -475,10 +504,11 @@ async function enviarPedidoADrivin(pedido: {
     numeroPedido: pedido.numeroPedido,
     kilos: pedido.kilos,
     fecha: pedido.fecha.toISOString().slice(0, 10),
+    schemaName,
   });
   return prisma.errandsPedido.update({
     where: { id: pedido.id },
-    data: { drivinEstadoEnvio: drivin.ok ? "ENVIADO" : "ERROR", drivinMensajeEnvio: drivin.mensaje ?? null },
+    data: { drivinEstadoEnvio: drivin.ok ? "ENVIADO" : "ERROR", drivinMensajeEnvio: drivin.mensaje ?? null, drivinSchemaName: schemaName },
     include: { cliente: true, puntoVenta: true, domiciliario: true },
   });
 }
@@ -487,6 +517,7 @@ router.post("/pedidos", requirePermiso("distrilog.errands.editar"), async (req, 
   try {
     const body = z.object({ pedidos: z.array(pedidoSchema).min(1) }).safeParse(req.body);
     const filas = body.success ? body.data.pedidos : [pedidoSchema.parse(req.body)];
+    const esquemas = await listarEsquemasDrivin();
 
     const creados = [];
     for (const data of filas) {
@@ -505,7 +536,8 @@ router.post("/pedidos", requirePermiso("distrilog.errands.editar"), async (req, 
         include: { cliente: true, puntoVenta: true, domiciliario: true },
       });
       // Best-effort: crea el pedido como orden real en Drivin (no bloquea si falla).
-      const pedidoConEnvio = await enviarPedidoADrivin(pedido);
+      const schemaName = data.schemaName || (pedido.puntoVenta ? emparejarEsquemaDrivin(pedido.puntoVenta.nombre, esquemas) : null);
+      const pedidoConEnvio = await enviarPedidoADrivin(pedido, schemaName);
       creados.push(pedidoConEnvio);
     }
     res.status(201).json(body.success ? { creados } : creados[0]);
@@ -517,8 +549,12 @@ router.post("/pedidos", requirePermiso("distrilog.errands.editar"), async (req, 
 router.put("/pedidos/:id", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const data = pedidoSchema.partial().parse(req.body);
-    const pedido = await prisma.errandsPedido.update({ where: { id }, data, include: { cliente: true, puntoVenta: true, domiciliario: true } });
+    const { schemaName, ...resto } = pedidoSchema.partial().parse(req.body);
+    const pedido = await prisma.errandsPedido.update({
+      where: { id },
+      data: { ...resto, ...(schemaName !== undefined ? { drivinSchemaName: schemaName || null } : {}) },
+      include: { cliente: true, puntoVenta: true, domiciliario: true },
+    });
     res.json(pedido);
   } catch (err) {
     next(err);
@@ -541,9 +577,13 @@ router.put("/pedidos/:id/estado", requirePermiso("distrilog.errands.editar"), as
 router.post("/pedidos/:id/reenviar-drivin", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const pedido = await prisma.errandsPedido.findUnique({ where: { id }, include: { cliente: true } });
+    const pedido = await prisma.errandsPedido.findUnique({ where: { id }, include: { cliente: true, puntoVenta: true } });
     if (!pedido) throw new HttpError(404, "Pedido no encontrado");
-    const actualizado = await enviarPedidoADrivin(pedido);
+    let schemaName = pedido.drivinSchemaName;
+    if (!schemaName && pedido.puntoVenta) {
+      schemaName = emparejarEsquemaDrivin(pedido.puntoVenta.nombre, await listarEsquemasDrivin());
+    }
+    const actualizado = await enviarPedidoADrivin(pedido, schemaName);
     res.json(actualizado);
   } catch (err) {
     next(err);

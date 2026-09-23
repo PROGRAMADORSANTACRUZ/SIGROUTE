@@ -17,10 +17,10 @@ import { usePermiso } from "@/lib/permisos";
 import { ApiError } from "@/lib/api";
 import {
   type ErrandsCliente, type ErrandsPedido, type ErrandsPuntoVenta, type ErrandsPedidoInput,
-  type ErrandsDomiciliario, type ErrandsDomiciliarioInput,
+  type ErrandsDomiciliario, type ErrandsDomiciliarioInput, type ErrandsDrivinEsquema,
   getErrandsPedidos, getErrandsClientes, getErrandsPuntosVenta,
   crearErrandsPedidosLote, editarErrandsPedido, cambiarEstadoErrandsPedido, eliminarErrandsPedido, borrarTodosErrandsPedidos,
-  reenviarErrandsPedidoDrivin, sincronizarErrandsPedidosDrivin,
+  reenviarErrandsPedidoDrivin, sincronizarErrandsPedidosDrivin, getErrandsDrivinEsquemas,
   getErrandsPedidoNextNumero, exportarErrandsFreeOrder,
   crearErrandsCliente, editarErrandsCliente, eliminarErrandsCliente, borrarTodosErrandsClientes, cargaMasivaErrandsClientes,
   crearErrandsPuntoVenta, editarErrandsPuntoVenta, eliminarErrandsPuntoVenta,
@@ -338,10 +338,16 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
   const [resultados, setResultados] = useState<ErrandsCliente[]>([]);
   const [estado, setEstado] = useState<ErrandsPedido["estado"]>(editando?.estado ?? "REVISADO");
   const [observaciones, setObservaciones] = useState(editando?.observaciones ?? "");
+  const [esquemas, setEsquemas] = useState<ErrandsDrivinEsquema[]>([]);
+  const [schemaName, setSchemaName] = useState(editando?.drivinSchemaName ?? "");
   const [cola, setCola] = useState<{ label: string; input: ErrandsPedidoInput }[]>([]);
   const [creandoCliente, setCreandoCliente] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    getErrandsDrivinEsquemas().then(setEsquemas).catch(() => setEsquemas([]));
+  }, []);
 
   const domiciliariosFiltrados = puntoVentaId
     ? domiciliarios.filter((d) => d.activo && d.puntoVentaId === Number(puntoVentaId))
@@ -381,6 +387,7 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
       domiciliarioId: domiciliarioId ? Number(domiciliarioId) : null,
       estado,
       observaciones: observaciones || undefined,
+      schemaName: schemaName || undefined,
     };
   }
 
@@ -455,6 +462,17 @@ function PedidoModal({ editando, pdvs, domiciliarios, onClose, onSaved }: {
               {puntoVentaId && domiciliariosFiltrados.length === 0 && (
                 <span className="text-xs text-[#a86a12]">Este PDV no tiene domiciliarios asignados.</span>
               )}
+            </label>
+          </div>
+
+          <div className="mb-4">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-[#7a8794]">Esquema Drivin</span>
+              <select value={schemaName} onChange={(e) => setSchemaName(e.target.value)} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
+                <option value="">Automático (según PDV)</option>
+                {esquemas.map((e) => <option key={e.code} value={e.name}>{e.name}</option>)}
+              </select>
+              <span className="text-xs text-[#9aa4af]">Se elige solo según el PDV de origen; si no encuentra uno, elige aquí manualmente.</span>
             </label>
           </div>
 
