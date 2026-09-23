@@ -9,11 +9,20 @@ set -e
 
 # Backend Express
 node /app/backend/dist/index.js &
+BACKEND_PID=$!
 
 # Frontend Next.js (necesita cwd = frontend)
 cd /app/frontend
 /app/node_modules/.bin/next start -p 3000 &
+FRONTEND_PID=$!
+cd /app
+
+# Si backend o frontend mueren (ej. faltan variables de entorno y el proceso
+# hace exit(1)), el contenedor debe morir con ellos -> así "restart:
+# unless-stopped" lo reinicia, en vez de quedar "vivo" con Nginx sirviendo
+# 502/504 para siempre detrás de un proceso que ya no existe.
+( wait "$BACKEND_PID"; echo "[docker-start] backend terminó, apagando contenedor"; kill -TERM 1 ) &
+( wait "$FRONTEND_PID"; echo "[docker-start] frontend terminó, apagando contenedor"; kill -TERM 1 ) &
 
 # Nginx en primer plano (mantiene vivo el contenedor)
-cd /app
 nginx -g "daemon off;"
