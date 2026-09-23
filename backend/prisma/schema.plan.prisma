@@ -698,6 +698,15 @@ model ErrandsPedido {
   fecha           DateTime @default(now())
   usuario         String?  @db.VarChar(60)
   createdAt       DateTime @default(now()) @map("created_at")
+  // Estado del ENVÍO a Drivin (creación de la orden allá), no del pipeline
+  // local: PENDIENTE (aún no se intentó) | ENVIADO | ERROR.
+  drivinEstadoEnvio  String    @default("PENDIENTE") @map("drivin_estado_envio") @db.VarChar(20)
+  drivinMensajeEnvio String?   @map("drivin_mensaje_envio")
+  // Estado de ENTREGA leído de Drivin (POD): se refresca con "Sincronizar con
+  // Drivin" y ahí mismo actualiza el `estado` de arriba (Entregado/Cancelado).
+  drivinEstadoEntrega String?   @map("drivin_estado_entrega") @db.VarChar(30)
+  drivinMotivoEntrega String?   @map("drivin_motivo_entrega")
+  drivinSyncAt        DateTime? @map("drivin_sync_at")
 
   cliente      ErrandsCliente       @relation(fields: [clienteId], references: [id])
   puntoVenta   ErrandsPuntoVenta?   @relation(fields: [puntoVentaId], references: [id])

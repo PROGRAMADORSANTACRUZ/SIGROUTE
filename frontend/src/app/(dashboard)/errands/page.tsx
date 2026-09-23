@@ -20,6 +20,7 @@ import {
   type ErrandsDomiciliario, type ErrandsDomiciliarioInput,
   getErrandsPedidos, getErrandsClientes, getErrandsPuntosVenta,
   crearErrandsPedidosLote, editarErrandsPedido, cambiarEstadoErrandsPedido, eliminarErrandsPedido, borrarTodosErrandsPedidos,
+  reenviarErrandsPedidoDrivin, sincronizarErrandsPedidosDrivin,
   getErrandsPedidoNextNumero, exportarErrandsFreeOrder,
   crearErrandsCliente, editarErrandsCliente, eliminarErrandsCliente, borrarTodosErrandsClientes, cargaMasivaErrandsClientes,
   crearErrandsPuntoVenta, editarErrandsPuntoVenta, eliminarErrandsPuntoVenta,
@@ -38,6 +39,11 @@ const ESTADO_COLOR: Record<string, string> = {
   CANCELADO: "bg-[#fbeceb] text-[#b3261e]",
   EDITADO: "bg-[#f2f5ef] text-[#5f7a68]",
   REVISADO: "bg-[#e8f3e2] text-[#2f8f4e]",
+};
+const DRIVIN_ENVIO_COLOR: Record<string, string> = {
+  PENDIENTE: "bg-[#f2f5ef] text-[#5f7a68]",
+  ENVIADO: "bg-[#e8f3e2] text-[#2f8f4e]",
+  ERROR: "bg-[#fbeceb] text-[#b3261e]",
 };
 
 export default function ErrandsPage() {
@@ -101,6 +107,8 @@ function PedidosTab({ puedeEditar }: { puedeEditar: boolean }) {
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [exportando, setExportando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [reenviando, setReenviando] = useState<number | null>(null);
   const [modalPedido, setModalPedido] = useState(false);
   const [editando, setEditando] = useState<ErrandsPedido | null>(null);
   const [borrarTodo, setBorrarTodo] = useState(false);
@@ -147,6 +155,32 @@ function PedidosTab({ puedeEditar }: { puedeEditar: boolean }) {
     }
   }
 
+  async function reenviarDrivin(p: ErrandsPedido) {
+    setReenviando(p.id);
+    try {
+      const actualizado = await reenviarErrandsPedidoDrivin(p.id);
+      showToast(actualizado.drivinEstadoEnvio === "ENVIADO" ? "Pedido enviado a Drivin." : `Drivin rechazó el pedido: ${actualizado.drivinMensajeEnvio ?? "error desconocido"}`, actualizado.drivinEstadoEnvio === "ENVIADO" ? "success" : "error");
+      cargar();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Error al reenviar a Drivin", "error");
+    } finally {
+      setReenviando(null);
+    }
+  }
+
+  async function sincronizarDrivin() {
+    setSincronizando(true);
+    try {
+      const r = await sincronizarErrandsPedidosDrivin({ desde: desde || undefined, hasta: hasta || undefined });
+      showToast(`Drivin: ${r.consultados} entregas consultadas, ${r.actualizados} pedido(s) actualizados.`, "success");
+      cargar();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Error al sincronizar con Drivin", "error");
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   async function eliminar(p: ErrandsPedido) {
     if (await confirm({ title: "¿Eliminar este pedido?", message: `${p.numeroPedido} — ${p.cliente.nombre}`, danger: true, confirmLabel: "Eliminar" })) {
       eliminarErrandsPedido(p.id).then(cargar).catch((err) => showToast(err instanceof ApiError ? err.message : "Error", "error"));
@@ -165,6 +199,11 @@ function PedidosTab({ puedeEditar }: { puedeEditar: boolean }) {
         <button onClick={exportar} disabled={exportando} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-60">
           {IconDownload} {exportando ? "Generando…" : `Exportar Excel${seleccion.size > 0 ? ` (${seleccion.size})` : ""}`}
         </button>
+        {puedeEditar && (
+          <button onClick={sincronizarDrivin} disabled={sincronizando} title="Consulta en Drivin si los pedidos ya fueron entregados/cancelados" className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-60">
+            {IconCheckCircle} {sincronizando ? "Sincronizando…" : "Sincronizar con Drivin"}
+          </button>
+        )}
         {puedeEditar && (
           <button onClick={() => setBorrarTodo(true)} className="ml-auto inline-flex items-center gap-2 rounded-lg border border-[#f0c4c1] bg-white px-3 py-2 text-xs font-medium text-[#b3261e] hover:bg-[#fbeceb]">
             {IconTrash} Eliminar todos
@@ -203,7 +242,7 @@ function PedidosTab({ puedeEditar }: { puedeEditar: boolean }) {
                 <th className="px-3 py-2">Destino</th>
                 <th className="px-3 py-2">Domiciliario</th>
                 <th className="px-3 py-2">Fecha</th>
-                <th className="px-3 py-2 text-center">Kilos</th>
+                <th className="px-3 py-2">Envío Drivin</th>
                 <th className="px-3 py-2">Estado</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
@@ -220,7 +259,19 @@ function PedidosTab({ puedeEditar }: { puedeEditar: boolean }) {
                   </td>
                   <td className="px-3 py-2 text-[#45505e]">{p.domiciliario?.nombre ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-[#7a8794]">{new Date(p.fecha).toLocaleString("es-CO")}</td>
-                  <td className="px-3 py-2 text-center tabular-nums">{p.kilos}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <span title={p.drivinMensajeEnvio ?? undefined} className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${DRIVIN_ENVIO_COLOR[p.drivinEstadoEnvio]}`}>
+                        {p.drivinEstadoEnvio === "ENVIADO" ? "Enviado" : p.drivinEstadoEnvio === "ERROR" ? "Error" : "Pendiente"}
+                      </span>
+                      {puedeEditar && p.drivinEstadoEnvio === "ERROR" && (
+                        <IconButton title="Reintentar envío a Drivin" onClick={() => reenviarDrivin(p)} disabled={reenviando === p.id}>
+                          {IconUpload}
+                        </IconButton>
+                      )}
+                    </div>
+                    {p.drivinEstadoEntrega && <p className="mt-0.5 text-[10px] text-[#9aa4af]">Drivin: {p.drivinEstadoEntrega}{p.drivinMotivoEntrega ? ` · ${p.drivinMotivoEntrega}` : ""}</p>}
+                  </td>
                   <td className="px-3 py-2">
                     {puedeEditar ? (
                       <select value={p.estado} onChange={(e) => cambiarEstado(p, e.target.value as ErrandsPedido["estado"])} className={`rounded-full border-0 px-2 py-1 text-xs font-medium outline-none ${ESTADO_COLOR[p.estado]}`}>

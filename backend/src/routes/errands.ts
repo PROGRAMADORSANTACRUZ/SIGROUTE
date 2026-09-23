@@ -9,7 +9,8 @@ import * as XLSX from "xlsx";
 import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
-import { sincronizarClienteDrivin, crearPedidoDrivin } from "../lib/drivin";
+import { sincronizarClienteDrivin, crearPedidoDrivin, consultarPodsDrivin } from "../lib/drivin";
+import { env } from "../config/env";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("distrilog.errands.ver"));
@@ -391,7 +392,9 @@ router.post(
 
 async function siguienteNumeroPedido(): Promise<string> {
   const rows = await prisma.errandsPedido.findMany({ select: { numeroPedido: true } });
-  let max = 0;
+  // En Drivin ya existían pedidos hasta OSRun01755 (de antes de esta app);
+  // el piso evita reiniciar en 00001 y chocar/desalinearse con lo de allá.
+  let max = env.ERRANDS_NUMERO_PEDIDO_BASE;
   for (const r of rows) {
     const m = /^OSRun(\d+)$/.exec(r.numeroPedido);
     if (m) max = Math.max(max, Number(m[1]));
@@ -451,6 +454,35 @@ const pedidoSchema = z.object({
   observaciones: z.string().trim().optional(),
 });
 
+// Sincroniza primero la dirección del cliente en el Maestro de Drivin (por si
+// nunca se sincronizó, p. ej. clientes de carga masiva) y luego crea el
+// pedido como orden allá. Guarda el resultado (éxito/error) en el pedido para
+// que quede visible en la tabla en vez de perderse en silencio.
+async function enviarPedidoADrivin(pedido: {
+  id: number; numeroPedido: string; kilos: number; fecha: Date;
+  cliente: {
+    codigo: string; nombre: string; direccion: string | null; barrio: string | null;
+    ciudad: string | null; region: string | null; telefono: string | null; email: string | null;
+  };
+}) {
+  await sincronizarClienteDrivin({
+    codigo: pedido.cliente.codigo, nombre: pedido.cliente.nombre, direccion: pedido.cliente.direccion,
+    barrio: pedido.cliente.barrio, ciudad: pedido.cliente.ciudad, region: pedido.cliente.region,
+    telefono: pedido.cliente.telefono, email: pedido.cliente.email,
+  });
+  const drivin = await crearPedidoDrivin({
+    clienteCodigo: pedido.cliente.codigo,
+    numeroPedido: pedido.numeroPedido,
+    kilos: pedido.kilos,
+    fecha: pedido.fecha.toISOString().slice(0, 10),
+  });
+  return prisma.errandsPedido.update({
+    where: { id: pedido.id },
+    data: { drivinEstadoEnvio: drivin.ok ? "ENVIADO" : "ERROR", drivinMensajeEnvio: drivin.mensaje ?? null },
+    include: { cliente: true, puntoVenta: true, domiciliario: true },
+  });
+}
+
 router.post("/pedidos", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
   try {
     const body = z.object({ pedidos: z.array(pedidoSchema).min(1) }).safeParse(req.body);
@@ -473,13 +505,8 @@ router.post("/pedidos", requirePermiso("distrilog.errands.editar"), async (req, 
         include: { cliente: true, puntoVenta: true, domiciliario: true },
       });
       // Best-effort: crea el pedido como orden real en Drivin (no bloquea si falla).
-      await crearPedidoDrivin({
-        clienteCodigo: pedido.cliente.codigo,
-        numeroPedido: pedido.numeroPedido,
-        kilos: pedido.kilos,
-        fecha: pedido.fecha.toISOString().slice(0, 10),
-      });
-      creados.push(pedido);
+      const pedidoConEnvio = await enviarPedidoADrivin(pedido);
+      creados.push(pedidoConEnvio);
     }
     res.status(201).json(body.success ? { creados } : creados[0]);
   } catch (err) {
@@ -504,6 +531,68 @@ router.put("/pedidos/:id/estado", requirePermiso("distrilog.errands.editar"), as
     const { estado } = z.object({ estado: z.enum(ESTADOS_PEDIDO) }).parse(req.body);
     const pedido = await prisma.errandsPedido.update({ where: { id }, data: { estado } });
     res.json(pedido);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reintenta el envío a Drivin de un pedido puntual (p. ej. después de uno que
+// quedó en ERROR, o de corregir la dirección del cliente).
+router.post("/pedidos/:id/reenviar-drivin", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pedido = await prisma.errandsPedido.findUnique({ where: { id }, include: { cliente: true } });
+    if (!pedido) throw new HttpError(404, "Pedido no encontrado");
+    const actualizado = await enviarPedidoADrivin(pedido);
+    res.json(actualizado);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Traduce el status del POD de Drivin al estado interno del pedido de Errands.
+function estadoPedidoDesdePod(status: string): typeof ESTADOS_PEDIDO[number] | null {
+  switch (status) {
+    case "approved": return "ENTREGADO";
+    case "rejected": return "CANCELADO";
+    case "pending":
+    case "in-transit": return "EN_PROCESO";
+    default: return null;
+  }
+}
+
+// Consulta las pruebas de entrega (POD) de Drivin por rango de fechas y
+// refleja en cada pedido su estado real (entregado/cancelado/en proceso).
+router.post("/pedidos/sync-drivin", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const desde = String(req.query.desde ?? req.body?.desde ?? "");
+    const hasta = String(req.query.hasta ?? req.body?.hasta ?? hoy);
+    const desdeISO = desde || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const pods = await consultarPodsDrivin(desdeISO, hasta);
+
+    const pedidos = await prisma.errandsPedido.findMany({
+      where: { fecha: { gte: new Date(`${desdeISO}T00:00:00`) } },
+      select: { id: true, numeroPedido: true, estado: true },
+    });
+
+    let actualizados = 0;
+    for (const p of pedidos) {
+      const pod = pods.get(p.numeroPedido);
+      if (!pod) continue;
+      const estadoNuevo = estadoPedidoDesdePod(pod.status);
+      await prisma.errandsPedido.update({
+        where: { id: p.id },
+        data: {
+          drivinEstadoEntrega: pod.status,
+          drivinMotivoEntrega: pod.reason,
+          drivinSyncAt: new Date(),
+          ...(estadoNuevo && estadoNuevo !== p.estado ? { estado: estadoNuevo } : {}),
+        },
+      });
+      actualizados++;
+    }
+    res.json({ consultados: pods.size, actualizados });
   } catch (err) {
     next(err);
   }

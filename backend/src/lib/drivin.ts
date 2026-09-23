@@ -83,3 +83,31 @@ export async function crearPedidoDrivin(p: DrivinPedidoInput): Promise<{ ok: boo
     }],
   });
 }
+
+export interface DrivinPodInfo { status: string; reason: string | null }
+
+// Consulta las pruebas de entrega (POD) de Drivin en un rango de fechas y
+// devuelve un mapa código de orden -> {status, reason} (ver GET /v3/pods).
+// Igual que fetchPodEstados en routes/ordenes.ts, pero reutilizable para
+// cualquier módulo (aquí: Run Errands).
+export async function consultarPodsDrivin(desdeISO: string, hastaISO: string): Promise<Map<string, DrivinPodInfo>> {
+  const map = new Map<string, DrivinPodInfo>();
+  if (!habilitado()) return map;
+  try {
+    const resp = await fetch(`${env.DRIVIN_API_URL}/v3/pods?start_date=${desdeISO}&end_date=${hastaISO}`, {
+      headers: { "X-API-Key": env.DRIVIN_API_KEY! },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return map;
+    const json = (await resp.json()) as { data?: { attributes?: { code?: string | null; status?: string | null; reason?: string | null } }[] };
+    for (const item of json.data ?? []) {
+      const a = item.attributes ?? {};
+      if (!a.code) continue;
+      map.set(a.code, { status: (a.status ?? "").toLowerCase(), reason: a.reason ?? null });
+    }
+  } catch {
+    // best-effort: si Drivin falla, se deja el mapa vacío (no rompe el sync).
+  }
+  return map;
+}
+

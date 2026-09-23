@@ -71,6 +71,11 @@ export interface ErrandsPedido {
   cliente: ErrandsCliente;
   puntoVenta: ErrandsPuntoVenta | null;
   domiciliario: ErrandsDomiciliario | null;
+  drivinEstadoEnvio: "PENDIENTE" | "ENVIADO" | "ERROR";
+  drivinMensajeEnvio: string | null;
+  drivinEstadoEntrega: string | null;
+  drivinMotivoEntrega: string | null;
+  drivinSyncAt: string | null;
 }
 
 // ── Puntos de Venta ─────────────────────────────────────────────────────
@@ -183,6 +188,14 @@ export const cambiarEstadoErrandsPedido = (id: number, estado: ErrandsPedido["es
   req<ErrandsPedido>(`/pedidos/${id}/estado`, { method: "PUT", body: JSON.stringify({ estado }) });
 export const eliminarErrandsPedido = (id: number) => req(`/pedidos/${id}`, { method: "DELETE" });
 export const borrarTodosErrandsPedidos = () => req<{ eliminados: number }>("/pedidos/borrar-todos", { method: "POST" });
+export const reenviarErrandsPedidoDrivin = (id: number) => req<ErrandsPedido>(`/pedidos/${id}/reenviar-drivin`, { method: "POST" });
+export const sincronizarErrandsPedidosDrivin = (params?: { desde?: string; hasta?: string }) => {
+  const qs = new URLSearchParams();
+  if (params?.desde) qs.set("desde", params.desde);
+  if (params?.hasta) qs.set("hasta", params.hasta);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return req<{ consultados: number; actualizados: number }>(`/pedidos/sync-drivin${suffix}`, { method: "POST" });
+};
 
 export async function exportarErrandsFreeOrder(ids: number[]) {
   const blob = await req<Blob>("/pedidos/export-free-order", { method: "POST", body: JSON.stringify({ ids }) });

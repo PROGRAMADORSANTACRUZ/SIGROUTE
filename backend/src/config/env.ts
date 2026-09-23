@@ -42,6 +42,11 @@ const envSchema = z.object({
   // de Run Errands (requerido por POST /v2/multipleleg, legs[].schema_name).
   // Ajustar al nombre real que tengan configurado en su cuenta Drivin.
   DRIVIN_SCHEMA_NAME: z.string().default("Run Errands"),
+  // Piso del consecutivo OSRunXXXXX de Run Errands: en Drivin ya existían
+  // pedidos hasta OSRun01755 (creados antes de esta app), así que los nuevos
+  // deben seguir desde ahí en vez de reiniciar en OSRun00001 y chocar/quedar
+  // desalineados con lo que ya está allá.
+  ERRANDS_NUMERO_PEDIDO_BASE: z.coerce.number().default(1755),
 });
 
 const parsed = envSchema.safeParse(process.env);
