@@ -1,6 +1,6 @@
 // Resumen del Día (solo lectura) — puerto de legacy_fastapi/app/repos/resumen.py.
 import { Router } from "express";
-import { prismaPlan as prisma, prismaEjec } from "../../lib/prisma";
+import { prismaPlan as prisma } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { CATEGORIAS, INSTANCIA } from "../../lib/planCategorias";
 
@@ -56,7 +56,7 @@ router.get("/", async (req, res, next) => {
 
     const clienteIds = [...new Set(rutas.flatMap((r) => r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x)))];
     const clientes = clienteIds.length
-      ? await prismaEjec.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
+      ? await prisma.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
       : [];
     const clienteById = new Map(clientes.map((c) => [c.id, c]));
 

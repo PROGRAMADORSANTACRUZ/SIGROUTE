@@ -707,3 +707,271 @@ model ErrandsPedido {
   @@index([clienteId])
   @@map("errands_pedidos")
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// EJECUCIÓN (ex DISTRILOG/TATDRIVIN_DB) — migrados 1:1 a esta misma BD de
+// Planeación para dejar de depender de una segunda base de datos/conexión.
+// Planeación y Ejecución son dominios DISTINTOS aun cuando algún nombre se
+// parezca (p. ej. Conductor/Vehiculo/Auxiliar/Ruta aquí NO son lo mismo que
+// PlanConductor/PlanVehiculo/PlanAuxiliar/PlanRuta de más arriba — conviven
+// como tablas separadas, sin fusionar ni deduplicar).
+// ════════════════════════════════════════════════════════════════════════
+
+model Conductor {
+  id        String   @id @default(cuid())
+  nombres   String   @default("")
+  apellidos String   @default("")
+  cedula    String?  @unique
+  correo    String?
+  celular   String?
+  perfil    String   @default("Conductor")
+  depositos String?
+  clientes  String?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Vehiculo {
+  id                String   @id @default(cuid())
+  placa             String   @unique
+  modelo            String?
+  anio              Int?
+  horaInicioJornada String?
+  horaFinJornada    String?
+  caracteristica    String?
+  capacidad         String?
+  capacidadReal     String?
+  cubicaje          String?
+  empleadores       String?
+  flotas            String?
+  estado            String   @default("Activo")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Orden {
+  id          String   @id @default(cuid())
+  fecha       String
+  numeroOrden String
+  cliente     String
+  destino     String
+  producto    String
+  cantidadKg  Float    @default(0)
+  estado      String   @default("Pendiente")
+
+  nit    String?
+  codigo String?
+  valor  Float   @default(0)
+
+  direccion String?
+  vendedor  String?
+
+  clienteSistemaId String?
+
+  distribucion String  @default("AGROPECUARIA")
+  tatOrigen    String?
+
+  podCode       String?
+  scenarioToken String?
+  deliveredBy   String?
+  podLat        Float?
+  podLng        Float?
+  reasonName    String?
+  reasonCode    String?
+
+  reenviado   Boolean   @default(false)
+  reenviadoAt DateTime?
+
+  asignadoVehiculo String?
+  ruta             String?
+
+  createdAt DateTime @default(now())
+
+  @@index([numeroOrden])
+  @@index([distribucion])
+  @@index([asignadoVehiculo])
+  @@index([estado])
+  @@index([fecha])
+  @@index([ruta])
+}
+
+model Cliente {
+  id              String   @id @default(cuid())
+  codigoDireccion String?
+  nombreDireccion String?
+  cliente         String?
+  tipoDireccion   String?
+  direccion       String?
+  referencia      String?
+  descripcion     String?
+  comuna          String?
+  provincia       String?
+  region          String?
+  pais            String?
+  codigoPostal    String?
+  lat             String?
+  lon             String?
+  barrio          String?
+  manzana         String?
+  lote            String?
+  tipoVia         String?
+  telefono        String?
+  correo          String?
+  puntoVenta      String?
+  tipo            String?
+  vendedor        String?
+  extraDrivin     String?
+  activo          Boolean  @default(true)
+  consecutivos    String?
+  createdAt       DateTime @default(now())
+
+  @@index([cliente])
+}
+
+model PlanillaDespacho {
+  id           String    @id @default(cuid())
+  consecutivo  Int
+  fecha        String
+  placa        String
+  conductor    String?
+  origen       String?
+  horaSalida   String?
+  auxiliarRuta String?
+  tipoDespacho String?
+  ruta         String?
+  docs         Int       @default(0)
+  kilos        Float     @default(0)
+  clientes     String?
+  documentos   String?
+  items        String?
+  anulada      Boolean   @default(false)
+  anuladaAt    DateTime?
+  impresa      Boolean   @default(false)
+  impresaAt    DateTime?
+  reemplazadaPorConsecutivo Int?
+  reemplazaDeConsecutivo    Int?
+  createdAt    DateTime  @default(now())
+
+  @@index([fecha])
+  @@index([placa])
+}
+
+model Novedad {
+  id              String    @id @default(cuid())
+  consecutivo     Int
+  fecha           String
+  tipo            String    @default("")
+  prioridad       String    @default("Media")
+  estado          String    @default("Pendiente")
+  estadoEntrega   String    @default("Sin Novedad")
+  novedad         String?
+  responsabilidad String?
+  noLlego         String?
+  productos       String?
+  planillaId      String?
+  placa           String?
+  conductor       String?
+  auxiliarRuta    String?
+  cliente         String?
+  numeroOrden     String?
+  descripcion     String    @default("")
+  resolucion      String?
+  resueltaAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
+
+  @@index([estado])
+  @@index([fecha])
+}
+
+model Auxiliar {
+  id        String   @id @default(cuid())
+  nombre    String
+  telefono  String?
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Ruta {
+  id        String   @id @default(cuid())
+  nombre    String
+  recorrido String?
+  ciudad    String?
+  kls       Int?
+  tiempo    String?
+  grupo     String?
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model PlanNombre {
+  id        String   @id @default(cuid())
+  nombre    String
+  tipo      String?
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model CambioDespacho {
+  id         String   @id @default(cuid())
+  tipo       String
+  remision   String?
+  deVehiculo String?
+  aVehiculo  String?
+  dlOrigen   Int?
+  dlNuevo    Int?
+  detalle    String?
+  hecho      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([hecho])
+}
+
+model EnvioReplica {
+  placa     String   @id
+  veces     Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
+// Registro crudo de una fila capturada en la plantilla TAT (Agropecuaria o
+// Inversiones) — antes de cruzarla con la API de facturas (Siesa/apiconsulta).
+// Se conserva aunque el cruce falle, para poder corregir y reintentar.
+model OrdenTatPlantilla {
+  id          String   @id @default(cuid())
+  origen      String // AGROPECUARIA | INVERSIONES
+  fecha       String // dd/mm/aaaa tal cual se capturó
+  numeroOrden String // Factura / No. FA
+  placa       String?
+  conductor   String?
+  auxiliar    String?
+  ruta        String? // "Planilla" (Inversiones) o "Ruta" (Agropecuaria)
+  extra       String? // JSON: resto de columnas propias de cada plantilla
+  estado      String   @default("PENDIENTE") // PENDIENTE | CRUZADO | ERROR
+  mensaje     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([origen])
+  @@index([numeroOrden])
+  @@index([estado])
+  @@unique([origen, numeroOrden])
+}
+
+// Borrador EN VIVO de la grilla de captura de la plantilla TAT (persistido en
+// BD, no localStorage, para que cualquier usuario vea el mismo avance). Cada
+// fila de la grilla se guarda completa o no en `fila` (JSON). Las lecturas
+// siempre filtran por la "jornada" vigente (6pm a 6pm, ver lib/jornada.ts);
+// el cron de limpieza diaria borra jornadas viejas.
+model PlantillaTatBorrador {
+  id        Int      @id @default(autoincrement())
+  origen    String
+  jornada   String // fecha (yyyy-mm-dd) del corte de 6pm vigente
+  posicion  Int
+  fila      String // FilaEdit serializado en JSON
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([origen, jornada, posicion])
+  @@index([origen, jornada])
+}
+

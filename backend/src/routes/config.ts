@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prismaEjec as prisma } from "../lib/prisma";
+import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { AUXILIARES_DEFAULT, RUTAS_DEFAULT, PLAN_NOMBRES_DEFAULT } from "../data/configDefaults";

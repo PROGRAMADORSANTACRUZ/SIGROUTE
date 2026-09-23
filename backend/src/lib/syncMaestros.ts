@@ -4,12 +4,12 @@
 // de Planeación — los que ya no existan en Ejecución quedan tal cual (por
 // integridad de las FK de rutas/asignación ya creadas), solo se agregan o
 // actualizan los que sí coinciden.
-import { prismaPlan, prismaEjec } from "./prisma";
+import { prismaPlan } from "./prisma";
 
 const norm = (s: string) => s.trim().toUpperCase().replace(/\s+/g, " ");
 
 export async function sincronizarVehiculos(): Promise<{ creados: number; actualizados: number }> {
-  const ejecucion = await prismaEjec.vehiculo.findMany();
+  const ejecucion = await prismaPlan.vehiculo.findMany();
   const planeacion = await prismaPlan.planVehiculo.findMany();
   const porPlaca = new Map(planeacion.map((v) => [norm(v.placa), v]));
 
@@ -35,7 +35,7 @@ export async function sincronizarVehiculos(): Promise<{ creados: number; actuali
 }
 
 export async function sincronizarConductores(): Promise<{ creados: number; actualizados: number }> {
-  const ejecucion = await prismaEjec.conductor.findMany({ where: { activo: true } });
+  const ejecucion = await prismaPlan.conductor.findMany({ where: { activo: true } });
   const planeacion = await prismaPlan.planConductor.findMany();
   const porDocumento = new Map(planeacion.filter((c) => c.documento).map((c) => [norm(c.documento!), c]));
   const porNombre = new Map(planeacion.map((c) => [norm(c.nombre), c]));
@@ -58,7 +58,7 @@ export async function sincronizarConductores(): Promise<{ creados: number; actua
 }
 
 export async function sincronizarAuxiliares(): Promise<{ creados: number; actualizados: number }> {
-  const ejecucion = await prismaEjec.auxiliar.findMany();
+  const ejecucion = await prismaPlan.auxiliar.findMany();
   const planeacion = await prismaPlan.planAuxiliar.findMany();
   const porNombre = new Map(planeacion.map((a) => [norm(a.nombre), a]));
 

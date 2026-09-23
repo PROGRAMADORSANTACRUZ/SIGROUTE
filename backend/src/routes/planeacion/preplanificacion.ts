@@ -3,7 +3,7 @@
 // fechas COMPLETO (no una factura puntual) y las agrupa por ciudad, para que
 // Planeación decida rutas antes de que Ejecución las cargue una a una.
 import { Router } from "express";
-import { prismaEjec } from "../../lib/prisma";
+import { prismaPlan } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { HttpError } from "../../middleware/errorHandler";
 import { env } from "../../config/env";
@@ -158,7 +158,7 @@ router.get("/", async (req, res, next) => {
     // Jardín", "Comuna 3"), lo que antes inflaba grupos de "ciudad" falsos.
     const nits = [...new Set(docsFiltrados.map((d) => d.nit).filter(Boolean))];
     const clientesTat = nits.length
-      ? await prismaEjec.cliente.findMany({
+      ? await prismaPlan.cliente.findMany({
           where: { tipo: "TAT", OR: nits.map((n) => ({ codigoDireccion: { startsWith: n } })) },
           select: { codigoDireccion: true, cliente: true, comuna: true, provincia: true, region: true, barrio: true },
         })

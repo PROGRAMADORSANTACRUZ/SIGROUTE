@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { prismaEjec as prisma } from "../lib/prisma";
+import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { env } from "../config/env";

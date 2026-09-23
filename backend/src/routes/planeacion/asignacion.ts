@@ -2,7 +2,7 @@
 // — puerto de legacy_fastapi/app/repos/asignacion.py + routers/asignacion.py.
 import { Router } from "express";
 import { z } from "zod";
-import { prismaPlan as prisma, prismaEjec } from "../../lib/prisma";
+import { prismaPlan as prisma } from "../../lib/prisma";
 import { HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { INSTANCIA } from "../../lib/planCategorias";
@@ -113,7 +113,7 @@ router.get("/maestros", async (req, res, next) => {
       );
 
       if (kgByCliente.size) {
-        const clientes = await prismaEjec.cliente.findMany({
+        const clientes = await prisma.cliente.findMany({
           where: { id: { in: [...kgByCliente.keys()] }, activo: true },
           select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true, tipo: true },
         });

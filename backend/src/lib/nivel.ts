@@ -1,4 +1,4 @@
-import { prismaEjec as prisma } from "./prisma";
+import { prismaPlan as prisma } from "./prisma";
 
 // Crea novedades "Sin Novedad" (sin DL) en el Nivel de Servicio para las remisiones
 // indicadas que tengan vehículo asignado y aún no estén en el Nivel. No duplica.

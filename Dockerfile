@@ -1,11 +1,11 @@
 # ============================================================
 # SigRoute (Grupo Santacruz) — Dockerfile de producción para Dokploy
-# Monorepo: frontend (Next.js) + backend (Express/Prisma, 2 esquemas:
-# Planeación y Ejecución, cada una con su propia BD Postgres externa).
+# frontend (Next.js) + backend (Express/Prisma, una sola BD Postgres externa
+# ya unificada: Planeación+Ejecución).
 # Un solo contenedor: Nginx en :80 hace proxy de
 #   /api  → backend Node (:4000)
 #   /     → Next.js server (:3000)
-# Las bases de datos son externas (DATABASE_URL_PLAN / DATABASE_URL_EJEC).
+# La base de datos es externa (DATABASE_URL_PLAN).
 # ============================================================
 
 # ---- Etapa 1: Build (frontend + backend) ----

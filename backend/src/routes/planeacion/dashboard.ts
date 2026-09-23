@@ -1,6 +1,6 @@
 // Dashboard/Tablero — puerto de legacy_fastapi/app/repos/dashboard.py.
 import { Router } from "express";
-import { prismaPlan as prisma, prismaEjec } from "../../lib/prisma";
+import { prismaPlan as prisma } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { HttpError } from "../../middleware/errorHandler";
 import { CATEGORIAS, INSTANCIA } from "../../lib/planCategorias";
@@ -34,7 +34,7 @@ router.get("/comparativo", async (req, res, next) => {
       }
     }
 
-    const planillas = await prismaEjec.planillaDespacho.findMany({
+    const planillas = await prisma.planillaDespacho.findMany({
       where: { fecha: fechaStr, anulada: false },
       select: { placa: true, kilos: true },
     });
@@ -113,7 +113,7 @@ router.get("/", async (req, res, next) => {
         .slice(0, 8);
       const ids = conKls.map((d) => d.clienteId).filter((x): x is string => !!x);
       const clientes = ids.length
-        ? await prismaEjec.cliente.findMany({ where: { id: { in: ids } }, select: { id: true, cliente: true, nombreDireccion: true } })
+        ? await prisma.cliente.findMany({ where: { id: { in: ids } }, select: { id: true, cliente: true, nombreDireccion: true } })
         : [];
       const clienteById = new Map(clientes.map((c) => [c.id, c]));
       return conKls.map((d) => ({

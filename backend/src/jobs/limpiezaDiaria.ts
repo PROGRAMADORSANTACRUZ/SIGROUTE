@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { prismaEjec as prisma } from "../lib/prisma";
+import { prismaPlan as prisma } from "../lib/prisma";
 import { jornadaKeyActual } from "../lib/jornada";
 
 // Cada día a las 6:00 PM (hora Colombia) limpia las órdenes cargadas del día para

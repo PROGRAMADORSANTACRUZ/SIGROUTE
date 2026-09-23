@@ -1,8 +1,8 @@
 version: "3.8"
 
-# SigRoute para Dokploy. Las bases de datos son externas (PostgreSQL remoto,
-# Planeación + Ejecución), por eso no se levanta contenedor de BD: se pasan
-# por DATABASE_URL_PLAN / DATABASE_URL_EJEC.
+# SigRoute para Dokploy. La base de datos es externa (PostgreSQL remoto,
+# Planeación+Ejecución ya migradas y unificadas en una sola BD), por eso no
+# se levanta contenedor de BD: se pasa por DATABASE_URL_PLAN.
 services:
   app:
     build:
@@ -17,7 +17,6 @@ services:
       PORT: 4000
       CORS_ORIGIN: ${CORS_ORIGIN:-https://sigroute.grupo-santacruz.com}
       DATABASE_URL_PLAN: ${DATABASE_URL_PLAN}
-      DATABASE_URL_EJEC: ${DATABASE_URL_EJEC}
       SECRET_KEY: ${SECRET_KEY}
       SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-true}
       DRIVIN_API_URL: ${DRIVIN_API_URL:-https://external.driv.in/api/external}

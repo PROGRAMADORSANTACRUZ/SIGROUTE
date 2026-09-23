@@ -8,14 +8,12 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "db:generate": "prisma generate --schema=prisma/schema.plan.prisma && prisma generate --schema=prisma/schema.ejec.prisma",
-    "db:push": "prisma db push --schema=prisma/schema.plan.prisma && prisma db push --schema=prisma/schema.ejec.prisma",
+    "db:generate": "prisma generate --schema=prisma/schema.plan.prisma",
+    "db:push": "prisma db push --schema=prisma/schema.plan.prisma",
     "db:migrate:plan": "prisma migrate dev --schema=prisma/schema.plan.prisma",
-    "db:migrate:ejec": "prisma migrate dev --schema=prisma/schema.ejec.prisma",
-    "db:pull": "prisma db pull --schema=prisma/schema.plan.prisma && prisma db pull --schema=prisma/schema.ejec.prisma",
+    "db:pull": "prisma db pull --schema=prisma/schema.plan.prisma",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio:plan": "prisma studio --schema=prisma/schema.plan.prisma",
-    "db:studio:ejec": "prisma studio --schema=prisma/schema.ejec.prisma --port 5556"
+    "db:studio:plan": "prisma studio --schema=prisma/schema.plan.prisma"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

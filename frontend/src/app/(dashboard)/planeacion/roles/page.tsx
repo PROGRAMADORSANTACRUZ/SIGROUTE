@@ -39,6 +39,26 @@ function permisoLabel(clave: string): string {
   return ACCION_LABELS[accion] ?? accion.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
+// Switch tipo iPhone reutilizable para activar/desactivar un permiso o un
+// grupo completo de permisos (módulo/submódulo).
+function Switch({ checked, onChange, size = "md" }: { checked: boolean; onChange: (v: boolean) => void; size?: "sm" | "md" }) {
+  const dims = size === "sm" ? { track: "h-5 w-9", knob: "h-4 w-4", on: 18, off: 2 } : { track: "h-6 w-11", knob: "h-5 w-5", on: 22, off: 2 };
+  return (
+    <label className="relative inline-flex shrink-0 cursor-pointer select-none items-center">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="peer sr-only" />
+      <span
+        className={`${dims.track} rounded-full transition-colors duration-200`}
+        style={{ backgroundColor: checked ? "#2f8f4e" : "#d7dcd8" }}
+      >
+        <span
+          className={`block ${dims.knob} translate-y-[1.5px] transform rounded-full bg-white shadow-sm transition-transform duration-200`}
+          style={{ transform: `translate(${checked ? dims.on : dims.off}px, 1.5px)` }}
+        />
+      </span>
+    </label>
+  );
+}
+
 interface SubModulo { label: string; claves: string[] }
 interface ModuloGrupo { label: string; submodulos: SubModulo[] }
 
@@ -247,7 +267,7 @@ export default function RolesPage() {
       {/* Modal: permisos del rol */}
       {permisosRol && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPermisosRol(null)}>
-          <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="shrink-0 border-b border-[#eceef0] px-6 py-4">
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-semibold text-[#14352a]">Permisos de {permisosRol.nombre}</h3>
@@ -275,53 +295,38 @@ export default function RolesPage() {
 
                 <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
                   {error && <p className="mb-3 text-sm text-[#b3261e]">{error}</p>}
-                  <div className="space-y-5">
+                  <div className="space-y-4">
                     {modulosFiltrados.map((mod) => {
                       const clavesModulo = mod.submodulos.flatMap((sm) => sm.claves);
                       const marcadosModulo = clavesModulo.filter((k) => claves.has(k)).length;
                       const todoModulo = marcadosModulo === clavesModulo.length;
                       return (
-                        <div key={mod.label} className="rounded-xl border border-[#c8d6cd] bg-[#f7faf5] p-3">
-                          <div className="mb-3 flex items-center justify-between">
-                            <p className="text-sm font-bold text-[#14352a]">{mod.label}</p>
-                            <button
-                              onClick={() => toggleGrupo(clavesModulo, !todoModulo)}
-                              className="text-[11px] font-semibold text-[#2f8f4e] hover:underline"
-                            >
-                              {todoModulo ? "Desmarcar módulo" : `Marcar todo el módulo (${marcadosModulo}/${clavesModulo.length})`}
-                            </button>
+                        <div key={mod.label} className="overflow-hidden rounded-2xl border border-[#c8d6cd] bg-[#f7faf5]">
+                          <div className="flex items-center justify-between gap-3 border-b border-[#c8d6cd] bg-[#eaf3e4] px-4 py-2.5">
+                            <div>
+                              <p className="text-sm font-bold text-[#14352a]">{mod.label}</p>
+                              <p className="text-[11px] text-[#5f7a68]">{marcadosModulo} de {clavesModulo.length} permisos activos</p>
+                            </div>
+                            <Switch checked={todoModulo} onChange={(v) => toggleGrupo(clavesModulo, v)} />
                           </div>
-                          <div className="space-y-3">
+                          <div className="space-y-2.5 p-3">
                             {mod.submodulos.map((sm) => {
                               const marcados = sm.claves.filter((k) => claves.has(k)).length;
                               const todos = marcados === sm.claves.length;
                               return (
-                                <div key={sm.label} className="rounded-lg border border-[#e1e9dd] bg-white p-3">
-                                  <div className="mb-2 flex items-center justify-between">
+                                <div key={sm.label} className="rounded-xl border border-[#e1e9dd] bg-white">
+                                  <div className="flex items-center justify-between gap-3 border-b border-[#eceef0] px-3 py-2">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-[#7a8794]">{sm.label}</p>
-                                    <button
-                                      onClick={() => toggleGrupo(sm.claves, !todos)}
-                                      className="text-[11px] font-medium text-[#2f8f4e] hover:underline"
-                                    >
-                                      {todos ? "Desmarcar todos" : `Marcar todos (${marcados}/${sm.claves.length})`}
-                                    </button>
+                                    <Switch size="sm" checked={todos} onChange={(v) => toggleGrupo(sm.claves, v)} />
                                   </div>
-                                  <div className="flex flex-wrap gap-2">
+                                  <div className="divide-y divide-[#f0f2ee]">
                                     {sm.claves.map((k) => {
                                       const activo = claves.has(k);
                                       return (
-                                        <button
-                                          key={k}
-                                          onClick={() => toggle(k)}
-                                          title={k}
-                                          className={`rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
-                                            activo
-                                              ? "border-[#2f8f4e] bg-[#e8f3e2] text-[#2f8f4e]"
-                                              : "border-[#dfe4e0] bg-white text-[#5f7a68] hover:bg-[#f4f6f3]"
-                                          }`}
-                                        >
-                                          {permisoLabel(k)}
-                                        </button>
+                                        <label key={k} title={k} className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm text-[#45505e] hover:bg-[#f9fbf7]">
+                                          <span>{permisoLabel(k)}</span>
+                                          <Switch size="sm" checked={activo} onChange={() => toggle(k)} />
+                                        </label>
                                       );
                                     })}
                                   </div>

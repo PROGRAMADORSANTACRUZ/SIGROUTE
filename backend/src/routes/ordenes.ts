@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
-import { prismaEjec as prisma, prismaPlan } from "../lib/prisma";
+import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { env } from "../config/env";
@@ -758,10 +758,10 @@ router.get("/preasignacion-hoy", requireAuth, async (req, res, next) => {
   try {
     const fecha = typeof req.query.fecha === "string" && req.query.fecha ? new Date(req.query.fecha) : new Date();
     fecha.setHours(0, 0, 0, 0);
-    const prog = await prismaPlan.programacion.findFirst({ where: { fecha } });
+    const prog = await prisma.programacion.findFirst({ where: { fecha } });
     if (!prog) return res.json({});
 
-    const rutas = await prismaPlan.planRuta.findMany({
+    const rutas = await prisma.planRuta.findMany({
       where: { progId: prog.id, vehiculoId: { not: null } },
       include: { vehiculo: true, destinos: { include: { destino: true } } },
     });

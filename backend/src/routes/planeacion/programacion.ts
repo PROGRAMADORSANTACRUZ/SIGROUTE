@@ -2,7 +2,7 @@
 // legacy_fastapi/app/routers/programacion.py + repos/programacion.py.
 import { Router } from "express";
 import { z } from "zod";
-import { prismaPlan as prisma, prismaEjec } from "../../lib/prisma";
+import { prismaPlan as prisma } from "../../lib/prisma";
 import { HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { areasPermitidas } from "../../lib/authSession";
@@ -54,7 +54,7 @@ router.get("/grid", async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
     const prog = await getOrCreateProg(fecha, req.user!.username);
-    const clientes = await prismaEjec.cliente.findMany({
+    const clientes = await prisma.cliente.findMany({
       where: { activo: true },
       orderBy: [{ cliente: "asc" }],
       select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true, tipo: true },
@@ -134,7 +134,7 @@ router.post("/guardar", requirePermiso("programacion.editar"), async (req, res, 
     const existentes = new Map(existentesRows.map((d) => [d.clienteId as string, d as unknown as Record<string, unknown>]));
     const clienteIds = body.filas.map((f) => f.clienteId);
     const clientes = clienteIds.length
-      ? await prismaEjec.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
+      ? await prisma.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
       : [];
     const clienteById = new Map(clientes.map((c) => [c.id, c]));
 

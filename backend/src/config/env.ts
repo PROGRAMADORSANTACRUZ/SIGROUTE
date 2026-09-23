@@ -7,10 +7,8 @@ const envSchema = z.object({
     .default("development"),
   PORT: z.coerce.number().default(4000),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
-  // Dos bases de datos separadas (no se fusionan, cada una ya tiene datos reales):
-  // Planeación = BD propia de rutas_web; Ejecución = BD propia de DISTRILOG.
+  // Una sola base de datos (Ejecución ya se migró a este mismo esquema).
   DATABASE_URL_PLAN: z.string().min(1, "DATABASE_URL_PLAN es obligatoria"),
-  DATABASE_URL_EJEC: z.string().min(1, "DATABASE_URL_EJEC es obligatoria"),
   // Clave para firmar la cookie de sesión (equivalente a SECRET_KEY de rutas_web/FastAPI).
   SECRET_KEY: z.string().min(16, "SECRET_KEY debe tener al menos 16 caracteres"),
   SESSION_HTTPS_ONLY: z

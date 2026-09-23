@@ -4,7 +4,7 @@
 // openpyxl; el contenido/columnas es igual, el estilo de celda se simplifica.
 import { Router } from "express";
 import * as XLSX from "xlsx";
-import { prismaPlan as prisma, prismaEjec } from "../../lib/prisma";
+import { prismaPlan as prisma } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { CATEGORIAS, INSTANCIA } from "../../lib/planCategorias";
 
@@ -29,7 +29,7 @@ function enviarExcel(res: import("express").Response, wb: XLSX.WorkBook, filenam
 async function resolverClientes(clienteIds: string[]) {
   const ids = [...new Set(clienteIds)];
   const clientes = ids.length
-    ? await prismaEjec.cliente.findMany({ where: { id: { in: ids } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
+    ? await prisma.cliente.findMany({ where: { id: { in: ids } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true } })
     : [];
   return new Map(clientes.map((c) => [c.id, { numero: c.codigoDireccion, nombre: c.cliente || c.nombreDireccion || "(sin nombre)" }]));
 }
@@ -54,7 +54,7 @@ router.get("/programacion.xlsx", requirePermiso("reportes.exportar"), async (req
     const detalleRows = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { not: null } } }) : [];
     const clienteIds = detalleRows.map((d) => d.clienteId as string);
     const clientes = clienteIds.length
-      ? await prismaEjec.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true, tipo: true } })
+      ? await prisma.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, codigoDireccion: true, cliente: true, nombreDireccion: true, tipo: true } })
       : [];
     const clienteById = new Map(clientes.map((c) => [c.id, c]));
     const destinos = detalleRows
