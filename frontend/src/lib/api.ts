@@ -212,7 +212,8 @@ export function createVehiculo(placa: string): Promise<Vehiculo> {
 
 // NOTA: la gestión de usuarios de DISTRILOG (AppUser, /api/users) fue
 // retirada — la reemplaza el módulo Usuarios+Roles de Planeación
-// (ver lib/planApi.ts, rutas /api/planeacion/usuarios y /api/planeacion/roles).
+// (ver lib/planApi.ts, rutas /api/planeacion/usuarios y /api/planeacion/roles;
+// las páginas del front viven en /configuracion/usuarios y /configuracion/roles).
 
 export function getConductores(): Promise<Conductor[]> {
   return request<Conductor[]>("/api/conductores");

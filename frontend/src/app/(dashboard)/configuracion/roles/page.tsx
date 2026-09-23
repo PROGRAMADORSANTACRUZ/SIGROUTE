@@ -68,11 +68,8 @@ export default function RolesPage() {
   const [areas, setAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [permisosRol, setPermisosRol] = useState<RolRow | null>(null);
   const [claves, setClaves] = useState<Set<string>>(new Set());
   const [busquedaPermiso, setBusquedaPermiso] = useState("");
-  const [guardandoPermisos, setGuardandoPermisos] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<RolRow | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -80,6 +77,10 @@ export default function RolesPage() {
   const [form, setForm] = useState({ nombre: "", descripcion: "", areaProgramacion: "" });
   const { showToast } = useToast();
   const { confirm } = useConfirm();
+
+  // El modal único de crear/editar ya trae el árbol de permisos; para el rol
+  // ADMIN (protegido) no se muestra el árbol ni se guardan permisos.
+  const editandoEsSistema = !!editing && ROLES_SISTEMA.has(editing.nombre);
 
   function cargar() {
     setLoading(true);
@@ -94,13 +95,18 @@ export default function RolesPage() {
   }
   useEffect(cargar, []);
 
-  async function abrirPermisos(rol: RolRow) {
-    setPermisosRol(rol);
+  // Abre el modal único de crear/editar rol; si viene un rol existente,
+  // también precarga sus permisos actuales para el árbol de switches.
+  async function abrirEditor(rol: RolRow | null) {
+    setEditing(rol);
+    setForm({ nombre: rol?.nombre ?? "", descripcion: rol?.descripcion ?? "", areaProgramacion: rol?.areaProgramacion ?? "" });
     setBusquedaPermiso("");
-    setError(null);
     setClaves(new Set());
-    const perms = await getRolPermisos(rol.id);
-    setClaves(new Set(perms));
+    setShowForm(true);
+    if (rol && !ROLES_SISTEMA.has(rol.nombre)) {
+      const perms = await getRolPermisos(rol.id);
+      setClaves(new Set(perms));
+    }
   }
 
   function toggle(clave: string) {
@@ -120,40 +126,13 @@ export default function RolesPage() {
     });
   }
 
-  async function guardarPermisos() {
-    if (!permisosRol) return;
-    setError(null);
-    setGuardandoPermisos(true);
-    try {
-      await setRolPermisos(permisosRol.id, [...claves]);
-      setPermisosRol(null);
-      showToast("Permisos actualizados.", "success");
-      cargar();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Error al guardar");
-    } finally {
-      setGuardandoPermisos(false);
-    }
-  }
-
-  function nuevoRol() {
-    setEditing(null);
-    setForm({ nombre: "", descripcion: "", areaProgramacion: "" });
-    setShowForm(true);
-  }
-
-  function editarForm(r: RolRow) {
-    setEditing(r);
-    setForm({ nombre: r.nombre, descripcion: r.descripcion ?? "", areaProgramacion: r.areaProgramacion ?? "" });
-    setShowForm(true);
-  }
-
   async function guardarForm() {
     setGuardandoForm(true);
     try {
       const data = { nombre: form.nombre, descripcion: form.descripcion, areaProgramacion: form.areaProgramacion || null };
+      const rolId = editing ? editing.id : ((await crearRol(data)) as { id: number }).id;
       if (editing) await editarRol(editing.id, data);
-      else await crearRol(data);
+      if (!editandoEsSistema) await setRolPermisos(rolId, [...claves]);
       setShowForm(false);
       showToast(editing ? "Rol actualizado." : "Rol creado.", "success");
       cargar();
@@ -163,6 +142,7 @@ export default function RolesPage() {
       setGuardandoForm(false);
     }
   }
+
 
   const modulosFiltrados = modulos
     .map((mod) => ({
@@ -186,7 +166,7 @@ export default function RolesPage() {
         title="Roles y permisos"
         subtitle="Define qué puede ver y hacer cada rol dentro de Planeación y Ejecución."
         actions={
-          <button onClick={nuevoRol} className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42]">
+          <button onClick={() => abrirEditor(null)} className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42]">
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
             Nuevo rol
           </button>
@@ -215,7 +195,7 @@ export default function RolesPage() {
               {roles.map((r) => {
                 const esSistema = ROLES_SISTEMA.has(r.nombre);
                 return (
-                  <tr key={r.id} className="cursor-pointer transition-colors hover:bg-[#f9fbf7]" onClick={() => abrirPermisos(r)}>
+                  <tr key={r.id} className="cursor-pointer transition-colors hover:bg-[#f9fbf7]" onClick={() => abrirEditor(r)}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-[#14352a]">{r.nombre}</span>
@@ -239,7 +219,7 @@ export default function RolesPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <IconButton title="Editar rol" onClick={() => editarForm(r)}>{IconPencil}</IconButton>
+                        <IconButton title="Editar rol" onClick={() => abrirEditor(r)}>{IconPencil}</IconButton>
                         {!esSistema && r.nUsuarios === 0 && (
                           <IconButton
                             title="Eliminar rol"
@@ -265,37 +245,57 @@ export default function RolesPage() {
       <p className="mt-3 text-xs text-[#9aa4af]">Haz clic en un rol para ver o editar sus permisos.</p>
 
       {/* Modal: permisos del rol */}
-      {permisosRol && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPermisosRol(null)}>
+      {/* Modal único: crear/editar rol + árbol de permisos */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowForm(false)}>
           <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="shrink-0 border-b border-[#eceef0] px-6 py-4">
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-semibold text-[#14352a]">Permisos de {permisosRol.nombre}</h3>
-                {ROLES_SISTEMA.has(permisosRol.nombre) && <span className="rounded-full bg-[#e8f3e2] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#2f8f4e]">Sistema</span>}
+                <h3 className="text-lg font-semibold text-[#14352a]">{editing ? `Editar rol: ${editing.nombre}` : "Nuevo rol"}</h3>
+                {editandoEsSistema && <span className="rounded-full bg-[#e8f3e2] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#2f8f4e]">Sistema</span>}
               </div>
               <p className="mt-0.5 text-sm text-[#5f7a68]">
-                {ROLES_SISTEMA.has(permisosRol.nombre)
+                {editandoEsSistema
                   ? "Acceso total protegido — no se puede modificar."
-                  : "Marca los módulos y acciones a los que este rol tiene acceso."}
+                  : "Define el nombre, la descripción y marca los módulos y acciones a los que este rol tiene acceso."}
               </p>
             </div>
 
-            {ROLES_SISTEMA.has(permisosRol.nombre) ? (
-              <div className="px-6 py-8 text-center text-sm text-[#7a8794]">El rol ADMIN siempre tiene todos los permisos (acceso total, protegido).</div>
-            ) : (
-              <>
-                <div className="shrink-0 border-b border-[#eceef0] px-6 py-3">
+            <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <label className="flex flex-1 flex-col gap-1">
+                  <span className="text-xs font-medium text-[#7a8794]">Nombre (se guarda en mayúsculas)</span>
+                  <input
+                    placeholder="Ej. SUPERVISOR"
+                    value={form.nombre}
+                    disabled={editandoEsSistema}
+                    onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
+                    className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm font-mono outline-none focus:border-[#2f8f4e] disabled:bg-[#f4f6f3]"
+                  />
+                </label>
+                <label className="flex flex-1 flex-col gap-1">
+                  <span className="text-xs font-medium text-[#7a8794]">Descripción</span>
+                  <input
+                    placeholder="Descripción breve"
+                    value={form.descripcion}
+                    onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))}
+                    className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+                  />
+                </label>
+              </div>
+
+              {editandoEsSistema ? (
+                <div className="mt-6 px-6 py-8 text-center text-sm text-[#7a8794]">El rol ADMIN siempre tiene todos los permisos (acceso total, protegido).</div>
+              ) : (
+                <>
                   <input
                     value={busquedaPermiso}
                     onChange={(e) => setBusquedaPermiso(e.target.value)}
                     placeholder="Buscar permiso o módulo…"
-                    className="w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+                    className="mt-4 w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
                   />
-                </div>
 
-                <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-4">
-                  {error && <p className="mb-3 text-sm text-[#b3261e]">{error}</p>}
-                  <div className="space-y-4">
+                  <div className="mt-4 space-y-4">
                     {modulosFiltrados.map((mod) => {
                       const clavesModulo = mod.submodulos.flatMap((sm) => sm.claves);
                       const marcadosModulo = clavesModulo.filter((k) => claves.has(k)).length;
@@ -309,6 +309,22 @@ export default function RolesPage() {
                             </div>
                             <Switch checked={todoModulo} onChange={(v) => toggleGrupo(clavesModulo, v)} />
                           </div>
+                          {mod.label === "Planeación" && (
+                            <div className="border-b border-[#c8d6cd] bg-white px-4 py-3">
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs font-medium text-[#7a8794]">Área de Planificación (restricción automática)</span>
+                                <select
+                                  value={form.areaProgramacion}
+                                  onChange={(e) => setForm((f) => ({ ...f, areaProgramacion: e.target.value }))}
+                                  className="w-full max-w-xs rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+                                >
+                                  <option value="">Sin restricción (todas)</option>
+                                  {areas.map((a) => <option key={a} value={a}>{a}</option>)}
+                                </select>
+                                <span className="text-xs text-[#9aa4af]">Todo usuario con este rol queda restringido a esa área en Planificación y las demás páginas de Planeación (salvo que tenga áreas propias configuradas).</span>
+                              </label>
+                            </div>
+                          )}
                           <div className="space-y-2.5 p-3">
                             {mod.submodulos.map((sm) => {
                               const marcados = sm.claves.filter((k) => claves.has(k)).length;
@@ -341,70 +357,20 @@ export default function RolesPage() {
                       <p className="py-8 text-center text-sm text-[#9aa4af]">Sin permisos que coincidan con la búsqueda.</p>
                     )}
                   </div>
-                </div>
-
-                <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#eceef0] px-6 py-4">
-                  <span className="text-xs text-[#7a8794]">{claves.size} permiso{claves.size !== 1 ? "s" : ""} seleccionado{claves.size !== 1 ? "s" : ""}</span>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => setPermisosRol(null)} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">Cancelar</button>
-                    <button onClick={guardarPermisos} disabled={guardandoPermisos} className="rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60">
-                      {guardandoPermisos ? "Guardando…" : "Guardar permisos"}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal: crear/editar rol */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="border-b border-[#eceef0] px-6 py-4">
-              <h3 className="text-lg font-semibold text-[#14352a]">{editing ? "Editar rol" : "Nuevo rol"}</h3>
-              <p className="mt-0.5 text-sm text-[#5f7a68]">{editing ? `Actualiza los datos de ${editing.nombre}.` : "Crea un rol y luego asígnale permisos."}</p>
+                </>
+              )}
             </div>
-            <div className="flex flex-col gap-3 px-6 py-5">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-[#7a8794]">Nombre (se guarda en mayúsculas)</span>
-                <input
-                  placeholder="Ej. SUPERVISOR"
-                  value={form.nombre}
-                  disabled={!!editing && ROLES_SISTEMA.has(editing.nombre)}
-                  onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
-                  className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm font-mono outline-none focus:border-[#2f8f4e] disabled:bg-[#f4f6f3]"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-[#7a8794]">Descripción</span>
-                <input
-                  placeholder="Descripción breve"
-                  value={form.descripcion}
-                  onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))}
-                  className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-medium text-[#7a8794]">Área de Planificación (restricción automática)</span>
-                <select
-                  value={form.areaProgramacion}
-                  disabled={!!editing && ROLES_SISTEMA.has(editing.nombre)}
-                  onChange={(e) => setForm((f) => ({ ...f, areaProgramacion: e.target.value }))}
-                  className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e] disabled:bg-[#f4f6f3]"
-                >
-                  <option value="">Sin restricción (todas)</option>
-                  {areas.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-                <span className="text-xs text-[#9aa4af]">Todo usuario con este rol queda restringido a esa área en Planificación (salvo que tenga áreas propias configuradas).</span>
-              </label>
-            </div>
-            <div className="flex items-center justify-end gap-3 border-t border-[#eceef0] px-6 py-4">
-              <button onClick={() => setShowForm(false)} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">Cancelar</button>
-              <button onClick={guardarForm} disabled={guardandoForm} className="rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60">
-                {guardandoForm ? "Guardando…" : "Guardar"}
-              </button>
+
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[#eceef0] px-6 py-4">
+              <span className="text-xs text-[#7a8794]">
+                {editandoEsSistema ? "" : `${claves.size} permiso${claves.size !== 1 ? "s" : ""} seleccionado${claves.size !== 1 ? "s" : ""}`}
+              </span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setShowForm(false)} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">Cancelar</button>
+                <button onClick={guardarForm} disabled={guardandoForm} className="rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60">
+                  {guardandoForm ? "Guardando…" : "Guardar"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

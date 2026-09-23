@@ -186,9 +186,9 @@ const navGroups: NavGroup[] = [
   {
     label: "Configuración",
     items: [
-      { href: "/planeacion/usuarios", label: "Usuarios", icon: usersIcon },
-      { href: "/planeacion/roles", label: "Roles y permisos", icon: gearIcon },
-      { href: "/planeacion/auditoria", label: "Auditoría", icon: clipboardIcon },
+      { href: "/configuracion/usuarios", label: "Usuarios", icon: usersIcon },
+      { href: "/configuracion/roles", label: "Roles y permisos", icon: gearIcon },
+      { href: "/configuracion/auditoria", label: "Auditoría", icon: clipboardIcon },
       { href: "/configuracion/clientes", label: "Clientes", icon: clientesIcon },
       { href: "/configuracion/vehiculos", label: "Vehículos", icon: truckIcon },
       { href: "/configuracion/conductores", label: "Conductores", icon: usersIcon },

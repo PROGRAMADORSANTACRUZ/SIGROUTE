@@ -35,9 +35,9 @@ export const MODULOS: Modulo[] = [
   { key: "/plantillas-tat/inversiones", label: "Plantilla TAT Inversiones", grupo: "Plantillas TAT", permiso: "plantillas_tat.ver" },
 
   // ── Configuración (catálogos de Planeación y de Ejecución, unificados) ─
-  { key: "/planeacion/auditoria", label: "Auditoría", grupo: "Configuración", permiso: "auditoria.ver" },
-  { key: "/planeacion/usuarios", label: "Usuarios", grupo: "Configuración", permiso: "usuarios.ver" },
-  { key: "/planeacion/roles", label: "Roles y permisos", grupo: "Configuración", permiso: "usuarios.roles" },
+  { key: "/configuracion/auditoria", label: "Auditoría", grupo: "Configuración", permiso: "auditoria.ver" },
+  { key: "/configuracion/usuarios", label: "Usuarios", grupo: "Configuración", permiso: "usuarios.ver" },
+  { key: "/configuracion/roles", label: "Roles y permisos", grupo: "Configuración", permiso: "usuarios.roles" },
   { key: "/configuracion/clientes", label: "Clientes", grupo: "Configuración", permiso: "config.clientes.ver" },
   { key: "/configuracion/vehiculos", label: "Vehículos", grupo: "Configuración", permiso: "config.vehiculos.ver" },
   { key: "/configuracion/rutas", label: "Rutas", grupo: "Configuración", permiso: "config.rutas.ver" },
