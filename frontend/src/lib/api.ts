@@ -277,6 +277,10 @@ export interface Orden {
   valor: number;
   direccion: string | null;
   vendedor: string | null;
+  // Ciudad real del cliente (maestro TAT); Orden.destino en TAT es una clave
+  // de agrupacion/asignacion (a veces el mismo codigo del cliente), NO una
+  // ciudad -- usar este campo para mostrar ciudad en documentos impresos.
+  ciudad?: string | null;
   reenviado: boolean;
   reenviadoAt: string | null;
   asignadoVehiculo: string | null;

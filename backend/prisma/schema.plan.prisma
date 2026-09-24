@@ -786,6 +786,12 @@ model Orden {
 
   direccion String?
   vendedor  String?
+  // Ciudad real del cliente (maestro TAT, Cliente.provincia); antes las
+  // facturas TAT/Inversiones mostraban el CÓDIGO interno del cliente en el
+  // campo "Ciudad" porque usaban Orden.destino (que en TAT es una clave de
+  // agrupación/asignación, no una ciudad) — bug real encontrado al verificar
+  // visualmente contra una factura impresa.
+  ciudad String?
 
   clienteSistemaId String?
 

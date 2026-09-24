@@ -1382,11 +1382,11 @@ async function guardarFacturaTat(
   const candidatosTat = nit
     ? await prisma.cliente.findMany({
         where: { tipo: "TAT", OR: [{ codigoDireccion: nit }, { codigoDireccion: { startsWith: `${nit}-` } }] },
-        select: { id: true, cliente: true, direccion: true, vendedor: true, barrio: true },
+        select: { id: true, cliente: true, direccion: true, vendedor: true, barrio: true, provincia: true },
       })
     : [];
   const dirInv = String(filas[0].direccion_sucursal ?? "").trim();
-  let clienteTat: { id: string; cliente: string | null; direccion: string | null; vendedor: string | null; barrio: string | null } | null = null;
+  let clienteTat: { id: string; cliente: string | null; direccion: string | null; vendedor: string | null; barrio: string | null; provincia: string | null } | null = null;
   if (candidatosTat.length === 1) {
     clienteTat = candidatosTat[0];
   } else if (candidatosTat.length > 1) {
@@ -1438,6 +1438,7 @@ async function guardarFacturaTat(
     direccion,
     clienteSistemaId: clienteTat?.id ?? null,
     vendedor: clienteTat?.vendedor?.trim() ?? null,
+    ciudad: clienteTat?.provincia?.trim() || null,
     valor: Number(f.valor_subtotal) || 0,
     estado: "Pendiente",
     distribucion: "TAT",

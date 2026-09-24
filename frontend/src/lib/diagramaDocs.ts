@@ -3,7 +3,6 @@
 // Agropecuaria), un solo documento HTML con salto de página por remisión.
 // Mismo patrón que lib/planillaDocs.ts (HTML + window.print(), sin pdfkit).
 import type { Orden, VehiculoExterno } from "@/lib/api";
-import { tc } from "@/lib/utils";
 import QRCode from "qrcode";
 
 const baseHref = (): string =>
@@ -378,7 +377,7 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
         <td class="lbl">MEDIO DE PAGO:</td><td>CONTADO</td>
       </tr>
       <tr>
-        <td class="lbl">CIUDAD:</td><td>${esc(tc(primera.destino))}</td>
+        <td class="lbl">CIUDAD:</td><td>${esc(primera.ciudad || "—")}</td>
         <td class="lbl">VENDEDOR:</td><td>${esc(primera.vendedor ?? "—")}</td>
       </tr>
       <tr>
@@ -506,7 +505,7 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
         <td class="lbl">Transportador:</td><td>${esc(vehiculo.conductor ?? "—")}</td>
       </tr>
       <tr>
-        <td class="lbl">Ciudad:</td><td>${esc(tc(primera.destino))}</td>
+        <td class="lbl">Ciudad:</td><td>${esc(primera.ciudad || "—")}</td>
         <td class="lbl">No. Remisión:</td><td>${esc(numeroOrden)}</td>
         <td class="lbl">Carque:</td><td>${esc(vehiculo.placa)}</td>
       </tr>
