@@ -772,6 +772,11 @@ model Orden {
   cliente     String
   destino     String
   producto    String
+  // Código Siesa del producto (referencia), ej. "2407" de "2407 - PULGAREJO
+  // CERDO COMESTIBLE" — solo disponible en órdenes cargadas desde Siesa (TAT/
+  // Inversiones, viene como prefijo de tipo_comercial); null en Bovino/Porcino
+  // cargados por Excel (ese archivo no trae código de producto).
+  productoCodigo String?  @db.VarChar(40)
   cantidadKg  Float    @default(0)
   estado      String   @default("Pendiente")
 

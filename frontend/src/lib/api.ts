@@ -265,6 +265,9 @@ export interface Orden {
   cliente: string;
   destino: string;
   producto: string;
+  // Código Siesa del producto (solo TAT/Inversiones, viene con la factura);
+  // null en Bovino/Porcino cargados por Excel.
+  productoCodigo?: string | null;
   cantidadKg: number;
   estado: string;
   distribucion: string;

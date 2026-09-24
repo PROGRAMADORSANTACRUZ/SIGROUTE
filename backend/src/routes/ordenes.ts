@@ -1302,6 +1302,14 @@ function limpiarProductoTat(tipo: string): string {
   return (m ? m[1] : s).replace(/\s+/g, " ").trim();
 }
 
+// Extrae el código Siesa del producto: "3202 - CANUTA COMESTIBLE" -> "3202"
+// (antes se descartaba en limpiarProductoTat; ahora se guarda aparte para
+// mostrarlo en la columna REF/Código de las facturas impresas).
+function codigoProductoTat(tipo: string): string | null {
+  const m = /^(\d+)\s*-\s*.+$/.exec(String(tipo ?? "").trim());
+  return m ? m[1] : null;
+}
+
 // yyyy-mm-dd + delta de días (puede ser negativo), sin librerías externas.
 function sumarDias(iso: string, delta: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -1423,6 +1431,7 @@ async function guardarFacturaTat(
     cliente: clienteReal || String(f.razon_social_cliente ?? "").trim(),
     destino,
     producto: limpiarProductoTat(String(f.tipo_comercial ?? "")) || "MERCANCÍA",
+    productoCodigo: codigoProductoTat(String(f.tipo_comercial ?? "")),
     cantidadKg: Number(f.cantidad_inv) || 0,
     nit: codigo,
     codigo,

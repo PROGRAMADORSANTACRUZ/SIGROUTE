@@ -27,15 +27,22 @@ function fechaHoy(): string {
   return new Date().toLocaleDateString("es-CO");
 }
 
-// Datos fijos de encabezado por razón social (solo lo confirmado por el
-// usuario con una factura real; lo que no se conoce se deja en blanco).
-const EMPRESAS: Record<string, { nombre: string; nit: string; direccion: string; telefono: string; ciudad: string; email: string }> = {
-  INVERSIONES: { nombre: "INVERSIONES SERRANO MILLAN S.A.S", nit: "900391505-9", direccion: "CALLE 4 #2-21", telefono: "3106115649", ciudad: "Malambo", email: "COMERCIAL@CFSANTACRUZ.COM" },
-  AGROPECUARIA: { nombre: "AGROPECUARIA SANTACRUZ LIMITADA", nit: "830505537", direccion: "", telefono: "", ciudad: "", email: "" },
+// Datos fijos de encabezado por razón social (verificados contra facturas
+// reales Siesa: FEP65016 para Agropecuaria, FESI25347 para Inversiones).
+const EMPRESAS: Record<string, { nombre: string; nit: string; direccion: string; telefono: string; ciudad: string; email: string; logo: string }> = {
+  INVERSIONES: { nombre: "INVERSIONES SERRANO MILLAN S.A.S", nit: "900391505-9", direccion: "CALLE 4 #2-21", telefono: "3106115649", ciudad: "Malambo", email: "COMERCIAL@CFSANTACRUZ.COM", logo: "/logos/inversiones-serrano-millan.png" },
+  AGROPECUARIA: { nombre: "AGROPECUARIA SANTACRUZ LIMITADA", nit: "830505537", direccion: "CLL 4 2 21", telefono: "", ciudad: "Malambo", email: "", logo: "/logos/agropecuaria-santacruz.png" },
 };
 
-function empresaDe(distribucion: string) {
-  return EMPRESAS[distribucion] ?? EMPRESAS.AGROPECUARIA;
+// La factura se emite bajo INVERSIONES SERRANO MILLAN solo cuando la orden es
+// TAT con tatOrigen INVERSIONES (cia=8 en Siesa); todo lo demás (TAT normal,
+// Bovino, Porcino) factura bajo AGROPECUARIA SANTACRUZ LIMITADA (cia=3).
+// OJO: antes esta función miraba `distribucion` (que solo vale "AGROPECUARIA"
+// o "TAT", nunca "INVERSIONES") y por eso Inversiones NUNCA mostraba su
+// propio encabezado — bug real, corregido 2026-09-24.
+function empresaDe(o: Orden) {
+  if (o.distribucion === "TAT" && o.tatOrigen === "INVERSIONES") return EMPRESAS.INVERSIONES;
+  return EMPRESAS.AGROPECUARIA;
 }
 
 // Fecha "DD/MM/YYYY" (formato con el que se guarda Orden.fecha) + N días,
@@ -185,9 +192,15 @@ const CSS_BASE = `
 export function docConsolidadoInversiones(vehiculo: VehiculoExterno, ordenes: Orden[]): string {
   const porProducto = new Map<string, { referencia: string; descripcion: string; cantidad: number }>();
   for (const o of ordenes) {
-    const m = /^(\d{2,})\s*[-–]?\s*(.+)$/.exec(o.producto.trim());
-    const referencia = m ? m[1] : "";
-    const descripcion = (m ? m[2] : o.producto).trim();
+    // Prefiere el código real de Siesa (productoCodigo, viene con la
+    // factura TAT/Inversiones); si no existe (Bovino/Porcino por Excel),
+    // cae al viejo truco de leerlo como prefijo del texto del producto.
+    let referencia = o.productoCodigo ?? "";
+    let descripcion = o.producto.trim();
+    if (!referencia) {
+      const m = /^(\d{2,})\s*[-–]?\s*(.+)$/.exec(descripcion);
+      if (m) { referencia = m[1]; descripcion = m[2].trim(); }
+    }
     const key = `${referencia}|${descripcion}`;
     const ex = porProducto.get(key);
     if (ex) ex.cantidad += o.cantidadKg;
@@ -195,16 +208,19 @@ export function docConsolidadoInversiones(vehiculo: VehiculoExterno, ordenes: Or
   }
   const filas = Array.from(porProducto.values()).sort((a, b) => a.referencia.localeCompare(b.referencia));
   const ruta = nombreRuta(vehiculo, ordenes);
+  const logo = EMPRESAS.INVERSIONES.logo;
 
-  return `<!doctype html><html><head><meta charset="utf-8">${baseHref()}<title>Consolidado ${esc(ruta)}</title><style>${CSS_BASE}</style></head>
+  return `<!doctype html><html><head><meta charset="utf-8">${baseHref()}<title>Consolidado ${esc(ruta)}</title><style>${CSS_BASE}
+    .consol-h { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .consol-h img { height: 46px; width: auto; }
+  </style></head>
   <body onload="setTimeout(function(){window.focus();window.print();},350)">
     <div class="page">
-      <h1>Formato consolidado de Despacho ruta: ${esc(ruta)}</h1>
-      <h2>Fecha: ${fechaConsolidado(ordenes)}</h2>
+      <div class="consol-h"><img src="${logo}" alt=""/><div><h1>Formato consolidado de Despacho ruta: ${esc(ruta)}</h1><h2>Fecha: ${fechaConsolidado(ordenes)}</h2></div></div>
       <table>
         <thead><tr><th style="width:90px">Referencia</th><th>Descripción</th><th style="width:90px">Cantidad</th></tr></thead>
         <tbody>
-          ${filas.map((f) => `<tr><td>${esc(f.referencia)}</td><td>${esc(f.descripcion)}</td><td style="text-align:right">${fmtInt(f.cantidad)}</td></tr>`).join("")}
+          ${filas.map((f) => `<tr><td>${esc(f.referencia || "—")}</td><td>${esc(f.descripcion)}</td><td style="text-align:right">${fmtInt(f.cantidad)}</td></tr>`).join("")}
         </tbody>
       </table>
     </div>
@@ -227,13 +243,15 @@ export function docConsolidadoTat(vehiculo: VehiculoExterno, ordenes: Orden[]): 
   const totalDinero = filas.reduce((s, f) => s + f.dinero, 0);
   const totalKilo = filas.reduce((s, f) => s + f.kilo, 0);
   const ruta = nombreRuta(vehiculo, ordenes);
+  const logo = EMPRESAS.AGROPECUARIA.logo;
 
   return `<!doctype html><html><head><meta charset="utf-8">${baseHref()}<title>Consolidado TAT ${esc(ruta)}</title><style>${CSS_BASE}
     .env { width: 26px; text-align: center; }
     .env.ng { background: #d9d9d9; }
     .num { width: 24px; text-align: center; }
     .cabecera { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; gap: 12px; }
-    .cab-izq { font-size: 11px; line-height: 1.6; }
+    .cab-izq { display: flex; align-items: center; gap: 10px; font-size: 11px; line-height: 1.6; }
+    .cab-izq img { height: 44px; width: auto; }
     .cab-der { width: 240px; border-collapse: collapse; }
     .cab-der td { border: 1px solid #333; padding: 3px 6px; font-size: 11px; }
     .cab-der .lbl { font-weight: bold; width: 70px; background: #f4f6f3; }
@@ -242,7 +260,7 @@ export function docConsolidadoTat(vehiculo: VehiculoExterno, ordenes: Orden[]): 
   <body onload="setTimeout(function(){window.focus();window.print();},350)">
     <div class="page">
       <div class="cabecera">
-        <div class="cab-izq"><div><b>CONDUCTOR:</b> ${esc(vehiculo.conductor ?? "")}</div><div><b>AUXILIAR:</b></div></div>
+        <div class="cab-izq"><img src="${logo}" alt=""/><div><div><b>CONDUCTOR:</b> ${esc(vehiculo.conductor ?? "")}</div><div><b>AUXILIAR:</b></div></div></div>
         <table class="cab-der">
           <tr><td class="lbl">RUTA</td><td class="val">${esc(ruta)}</td></tr>
           <tr><td class="lbl">FECHA</td><td class="val">${esc(fechaConsolidadoDMY(ordenes))}</td></tr>
@@ -278,18 +296,262 @@ export function docConsolidadoTat(vehiculo: VehiculoExterno, ordenes: Orden[]): 
   </body></html>`;
 }
 
-// ── Remisiones individuales de la ruta (estilo factura Siesa: TAT Agropecuaria
-// e Inversiones Serrano Millán usan el mismo formato, cambia solo el
-// encabezado de razón social/NIT) ──────────────────────────────────────────
-// Una página por remisión (numeroOrden), con salto de página entre ellas, para
-// que la impresora conectada las saque una tras otra en un solo trabajo.
-// CUFE/QR/firma digital: para TAT/Inversiones ahora vienen directo de Siesa
-// (confirmado en vivo 2026-09-24, vía t305_co_cfd) al cargar la factura —
-// Orden.cufe/qrTexto/firmaDigital ya no dependen de escanear la factura
-// física (eso queda como respaldo si Siesa aún no los tiene para esa
-// factura). El QR impreso aquí re-codifica exactamente ese mismo texto/URL
-// (no se inventa nada). En órdenes cargadas por Excel (Bovino/Porcino) esos
-// campos no existen todavía y se muestra un aviso honesto en su lugar.
+// CSS compartido por las 2 plantillas de factura Siesa (Agropecuaria/Inversiones).
+const CSS_FACTURA = `
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #000; margin: 0; padding: 18px; }
+  table { border-collapse: collapse; width: 100%; }
+  .page { page-break-after: always; padding-bottom: 4px; }
+  .page:last-child { page-break-after: auto; }
+  @media print { body { padding: 8px; } }
+  .chico { font-size: 9.5px; color: #333; }
+  .letras { margin: 5px 0; font-size: 10px; }
+  .pie-firmas { margin-top: 14px; }
+  .pie-firmas td { border: none; text-align: center; font-size: 9.5px; padding-top: 14px; }
+  .pie-firmas .linea { border-top: 1px solid #000; padding-top: 3px; }
+  .cufe-box { margin-top: 6px; font-size: 9px; word-break: break-all; }
+  .footer-nota { margin-top: 10px; font-size: 8.5px; color: #333; line-height: 1.4; }
+  .footer-marca { text-align: center; font-weight: bold; color: #2f8f4e; font-size: 11px; margin: 6px 0; }
+`;
+
+// ── Plantilla exacta AGROPECUARIA SANTACRUZ LIMITADA (calcada de la factura
+// real FEP65016: logo circular verde, encabezado sin bordes, tabla
+// CODIGO/DESCRIPCION/UM/CANT/COSTO UND/Descuento/%Dcto/IVA/COSTO TOTAL) ─────
+function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: VehiculoExterno): string {
+  const primera = lineas[0];
+  const empresa = EMPRESAS.AGROPECUARIA;
+  const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
+  const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
+  const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
+  const verificada = Boolean(primera.cufe && primera.qrTexto);
+
+  const filas = lineas.map((l) => {
+    const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
+    const descripcion = l.producto.replace(/^\d{2,}\s*[-–]?\s*/, "");
+    const precioUnit = l.cantidadKg > 0 ? l.valor / l.cantidadKg : 0;
+    return `<tr>
+      <td>${esc(referencia)}</td>
+      <td>${esc(descripcion)}</td>
+      <td style="text-align:center">KG</td>
+      <td style="text-align:right">${fmtMoney(l.cantidadKg)}</td>
+      <td style="text-align:right">$${fmtMoney(precioUnit)}</td>
+      <td style="text-align:right">$0.00</td>
+      <td style="text-align:center">0 %</td>
+      <td style="text-align:center">0 %</td>
+      <td style="text-align:right">$${fmtMoney(l.valor)}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div class="page">
+    <table class="agro-header">
+      <tr>
+        <td style="border:none;width:58%;vertical-align:top">
+          <img src="${empresa.logo}" class="agro-logo" alt=""/>
+          <div class="agro-empresa">${esc(empresa.nombre)}</div>
+          <div class="chico">${esc(empresa.direccion)}${empresa.ciudad ? " " + esc(empresa.ciudad) : ""}</div>
+          <div class="chico">NIT: ${esc(empresa.nit)}</div>
+          <div class="chico">Tel: ${esc(empresa.telefono)}</div>
+          <div class="chico" style="margin-top:4px">Autorización Numeración de Facturación — Responsables del impuesto sobre las ventas IVA</div>
+        </td>
+        <td style="border:none;width:42%;text-align:right;vertical-align:top">
+          ${verificada
+            ? `<div>${qrSvg(primera.qrTexto!)}</div>`
+            : `<div class="chico" style="color:#a33">Sin CUFE/QR — no hay factura Siesa asociada</div>`}
+          <div class="agro-titulo">FACTURA ELECTRONICA<br/>DE VENTA</div>
+          <table class="agro-campos">
+            <tr><td class="lbl">Factura de Venta:</td><td>${esc(numeroOrden)}</td></tr>
+            <tr><td class="lbl">Fecha de emisión:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td></tr>
+            <tr><td class="lbl">Fecha de vencimiento:</td><td>${esc(vcto)}</td></tr>
+            <tr><td class="lbl">Pedido:</td><td>${esc(primera.codigo ?? "—")}</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    <table class="agro-info">
+      <tr><td class="lbl">NOMBRE CLIENTE:</td><td colspan="3"><b>${esc(primera.cliente.toUpperCase())}</b></td></tr>
+      <tr>
+        <td class="lbl">NIT:</td><td>${esc(primera.nit ?? "—")}</td>
+        <td class="lbl">FORMA DE PAGO:</td><td>CONTADO</td>
+      </tr>
+      <tr>
+        <td class="lbl">DIRECCION:</td><td>${esc(primera.direccion ?? "—")}</td>
+        <td class="lbl">MEDIO DE PAGO:</td><td>CONTADO</td>
+      </tr>
+      <tr>
+        <td class="lbl">CIUDAD:</td><td>${esc(tc(primera.destino))}</td>
+        <td class="lbl">VENDEDOR:</td><td>${esc(primera.vendedor ?? "—")}</td>
+      </tr>
+      <tr>
+        <td class="lbl">TELEFONO:</td><td>—</td>
+        <td class="lbl">TRANSPORTADOR:</td><td>${esc(vehiculo.conductor ?? "—")} · ${esc(vehiculo.placa)}</td>
+      </tr>
+      <tr>
+        <td class="lbl">CORREO:</td><td>—</td>
+        <td class="lbl">No. REMISIÓN:</td><td>${esc(numeroOrden)}</td>
+      </tr>
+    </table>
+    <table class="agro-tabla">
+      <thead>
+        <tr><th>CODIGO</th><th>DESCRIPCION</th><th style="width:32px">UM</th><th style="width:60px">CANT</th><th style="width:70px">COSTO UND</th><th style="width:70px">Descuento</th><th style="width:44px">% Dcto</th><th style="width:44px">IVA</th><th style="width:85px">COSTO TOTAL</th></tr>
+      </thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <table class="agro-totales">
+      <tr><td class="lbl">VALOR BRUTO</td><td>$${fmtMoney(totalValor)}</td></tr>
+      <tr><td class="lbl">DESCUENTO</td><td>$0.00</td></tr>
+      <tr><td class="lbl">SUBTOTAL</td><td>$${fmtMoney(totalValor)}</td></tr>
+      <tr><td class="lbl">IVA</td><td>$0.00</td></tr>
+      <tr><td class="lbl">RETENCIONES</td><td>$0.00</td></tr>
+      <tr><td class="lbl">TOTAL A PAGAR</td><td><b>$${fmtMoney(totalValor)}</b></td></tr>
+    </table>
+    <p class="chico">Notas: PEDIDO ${esc(primera.codigo ?? numeroOrden)}</p>
+    <p class="letras"><b>VALOR EN LETRAS:</b> ${esc(valorEnLetras(totalValor))} *******</p>
+    <table class="pie-firmas">
+      <tr>
+        <td class="linea">Elaborado Por:</td>
+        <td class="linea">Recibo de la Factura</td>
+        <td class="linea">Aprobado Por:</td>
+      </tr>
+    </table>
+    <div class="cufe-box"><b>CUFE:</b> ${verificada ? esc(primera.cufe) : "No disponible en esta remisión"}</div>
+    <div class="cufe-box"><b>FIRMA DIGITAL:</b> ${primera.firmaDigital ? esc(primera.firmaDigital) : "no disponible en esta remisión"}</div>
+    <div class="footer-nota">
+      Su opinión es importante para nosotros.<br/>
+      Para peticiones, quejas, reclamos o felicitaciones, comuníquese con la Línea de Atención al Cliente al 316 435 4391 o con el Call Center a los números 323 619 5727 – 300 341 8833. Estamos para servirle!<br/><br/>
+      Notificación de Pagos: Agradecemos enviar el soporte de sus pagos o transferencias indicando NIT/ Nombre del Cliente / Número de factura, al correo: cartera@frigorificosantacruz.com y/o al WhatsApp: +57 3102257491.
+    </div>
+    <div class="footer-marca">TRANSFORMAMOS VIDA</div>
+    <div class="footer-nota" style="text-align:center">Factura generada por software SIESA de SISTEMAS DE INFORMACION EMPRESARIAL SAS. Nit 890.319.193-3. Siesa e-Invoicing Nit 890.319.193-3.</div>
+    <p class="nota" style="font-size:8px;color:#888;margin-top:8px">Documento de despacho interno generado por SigRoute a partir de la remisión ${esc(numeroOrden)}${verificada ? " (CUFE, QR y firma digital verificados directo con Siesa)" : ""} — no reemplaza la factura electrónica oficial certificada por Siesa/DIAN.</p>
+  </div>`;
+}
+
+// ── Plantilla exacta INVERSIONES SERRANO MILLAN S.A.S (calcada de la
+// factura real FESI25347: logo Carnes Frías, grilla de encabezado con
+// bordes, tabla Nro/REF/DESCRIPCION/LOTE/CANTIDAD/U.M./PRECIO UNIT/DSCTO/
+// IPCU/IVA%/VALOR TOTAL, sección de totales+impuestos idéntica) ───────────
+function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: VehiculoExterno): string {
+  const primera = lineas[0];
+  const empresa = EMPRESAS.INVERSIONES;
+  const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
+  const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
+  const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
+  const verificada = Boolean(primera.cufe && primera.qrTexto);
+  const iva = Math.round(totalValor * 0.05 * 100) / 100; // 5% IVA, misma tasa vista en la factura real
+  const subtotal = totalValor + iva;
+
+  const filas = lineas.map((l, i) => {
+    const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
+    const descripcion = l.producto.replace(/^\d{2,}\s*[-–]?\s*/, "");
+    const precioUnit = l.cantidadKg > 0 ? l.valor / l.cantidadKg : 0;
+    return `<tr>
+      <td style="text-align:center">${i + 1}</td>
+      <td>${esc(referencia)}</td>
+      <td>${esc(descripcion)}</td>
+      <td>—</td>
+      <td style="text-align:right">${fmtMoney(l.cantidadKg)}</td>
+      <td style="text-align:center">KG</td>
+      <td style="text-align:right">$${fmtMoney(precioUnit)}</td>
+      <td style="text-align:right">0.00 %</td>
+      <td style="text-align:right">0.00 %</td>
+      <td style="text-align:center">5 %</td>
+      <td style="text-align:right">$${fmtMoney(l.valor)}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div class="page">
+    <table class="inv-header">
+      <tr>
+        <td style="border:none;width:55%;vertical-align:top">
+          <table style="border:none"><tr>
+            <td style="border:none;width:70px;vertical-align:top"><img src="${empresa.logo}" class="inv-logo" alt=""/></td>
+            <td style="border:none;vertical-align:top">
+              <div class="inv-empresa">${esc(empresa.nombre)}</div>
+              <div class="chico">NIT. ${esc(empresa.nit)}</div>
+              <div class="chico">${esc(empresa.direccion)}</div>
+              <div class="chico">☎ ${esc(empresa.telefono)}</div>
+              <div class="chico">${esc(empresa.ciudad)}</div>
+              <div class="chico">✉ ${esc(empresa.email)}</div>
+            </td>
+          </tr></table>
+        </td>
+        <td style="border:none;width:45%;text-align:right;vertical-align:top">
+          ${verificada
+            ? `<div>${qrSvg(primera.qrTexto!)}</div>`
+            : `<div class="chico" style="color:#a33">Sin CUFE/QR — no hay factura Siesa asociada</div>`}
+          <div class="inv-titulo">FACTURA ELETRONICA</div>
+          <div class="inv-numero">${esc(numeroOrden)}</div>
+          <div class="chico">Página: 1 de 1</div>
+        </td>
+      </tr>
+    </table>
+    <table class="inv-info">
+      <tr>
+        <td class="lbl">Señor (es):</td><td>${esc(primera.cliente.toUpperCase())}</td>
+        <td class="lbl">Forma de Pago:</td><td>CONTADO</td>
+        <td class="lbl" rowspan="2">Vendedor:</td><td rowspan="2">${esc(primera.vendedor ?? "—")}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Contacto:</td><td>${esc(primera.cliente.toUpperCase())}</td>
+        <td class="lbl">Medio de Pago:</td><td>CONTADO</td>
+      </tr>
+      <tr>
+        <td class="lbl">Nit o C.C.:</td><td>${esc(primera.nit ?? "—")}</td>
+        <td class="lbl">Fecha Factura:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td>
+        <td class="lbl">Fecha de Vcto:</td><td>${esc(vcto)}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Dirección:</td><td>${esc(primera.direccion ?? "—")}</td>
+        <td class="lbl">Orden de Compra</td><td>${esc(primera.codigo ?? "—")}</td>
+        <td class="lbl">Transportador:</td><td>${esc(vehiculo.conductor ?? "—")}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Ciudad:</td><td>${esc(tc(primera.destino))}</td>
+        <td class="lbl">No. Remisión:</td><td>${esc(numeroOrden)}</td>
+        <td class="lbl">Carque:</td><td>${esc(vehiculo.placa)}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Barrio:</td><td>—</td>
+        <td class="lbl">Nro. Pedido</td><td>${esc(primera.codigo ?? numeroOrden)}</td>
+        <td class="lbl">Teléfono:</td><td>—</td>
+      </tr>
+    </table>
+    <div class="chico" style="margin:4px 0"><b>CUFE:</b> ${verificada ? esc(primera.cufe) : "No disponible en esta remisión"}</div>
+    <table class="inv-tabla">
+      <thead>
+        <tr><th style="width:24px">Nro</th><th style="width:44px">REF</th><th>DESCRIPCION</th><th style="width:50px">LOTE</th><th style="width:56px">CANTIDAD</th><th style="width:32px">U.M.</th><th style="width:70px">PRECIO UNIT</th><th style="width:40px">DSCTO</th><th style="width:40px">IPCU</th><th style="width:34px">IVA %</th><th style="width:85px">VALOR TOTAL</th></tr>
+      </thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <table class="inv-totales">
+      <tr><td class="lbl">Total Cantidad</td><td>${fmtInt(totalKg)}</td>
+        <td class="lbl">TOTAL BRUTO</td><td>$${fmtMoney(totalValor)}</td>
+        <td class="lbl">DSCTO X LINEA</td><td>$0.00</td></tr>
+      <tr><td class="lbl">IMPUESTOS</td><td>$${fmtMoney(iva)}</td>
+        <td class="lbl">SUB-TOTAL</td><td>$${fmtMoney(subtotal)}</td>
+        <td class="lbl">RETENCIONES</td><td>$0.00</td></tr>
+      <tr><td class="lbl" colspan="4">TOTAL</td><td colspan="2"><b>$${fmtMoney(subtotal)}</b></td></tr>
+    </table>
+    <table class="inv-impuestos">
+      <thead><tr><th></th><th>DESCRIPCIÓN IMPUESTO</th><th>BASE</th><th>TASA</th><th>TOTAL IMPUESTO</th></tr></thead>
+      <tbody><tr><td>IVA</td><td></td><td style="text-align:right">$${fmtMoney(totalValor)}</td><td style="text-align:center">5 %</td><td style="text-align:right">$${fmtMoney(iva)}</td></tr></tbody>
+    </table>
+    <p class="letras"><b>Valor Letras:</b> ${esc(valorEnLetras(subtotal))} *******</p>
+    <p class="chico">OBSERVACIONES: —</p>
+    <p class="chico">Autorización Numeración de Facturación — Vigencia de la resolución DIAN vigente.</p>
+    <table class="pie-firmas">
+      <tr><td>Para Pagos y Transferencias, Escanee el código QR:</td><td style="text-align:right">${verificada ? qrSvg(primera.qrTexto!, 72) : ""}</td></tr>
+    </table>
+    <div class="cufe-box"><b>Firma Digital Electrónica:</b> ${primera.firmaDigital ? esc(primera.firmaDigital) : "no disponible en esta remisión"}</div>
+    <div class="footer-nota" style="text-align:center;margin-top:8px">Factura generada por Software de Sistemas de información empresarial s.a.s NIT 890.319.193-3 PST Siesa e-Invoicing</div>
+    <p class="nota" style="font-size:8px;color:#888;margin-top:8px">Documento de despacho interno generado por SigRoute a partir de la remisión ${esc(numeroOrden)}${verificada ? " (CUFE, QR y firma digital verificados directo con Siesa)" : ""} — no reemplaza la factura electrónica oficial certificada por Siesa/DIAN.</p>
+  </div>`;
+}
+
+// ── Remisiones individuales de la ruta: cada factura se imprime con la
+// plantilla EXACTA de su propia razón social (AGROPECUARIA o INVERSIONES,
+// según empresaDe()) — antes usaban una única plantilla híbrida para ambas.
+// Una página por remisión (numeroOrden), con salto de página entre ellas.
 export function docRemisionesRuta(vehiculo: VehiculoExterno, ordenes: Orden[]): string {
   const porRemision = new Map<string, Orden[]>();
   for (const o of ordenes) {
@@ -299,131 +561,41 @@ export function docRemisionesRuta(vehiculo: VehiculoExterno, ordenes: Orden[]): 
   }
 
   const paginas = Array.from(porRemision.entries()).map(([numeroOrden, lineas]) => {
-    const primera = lineas[0];
-    const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
-    const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
-    const empresa = empresaDe(primera.distribucion);
-    const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
-    const verificada = Boolean(primera.cufe && primera.qrTexto);
-
-    const filas = lineas.map((l, i) => {
-      const m = /^(\d{2,})\s*[-–]?\s*(.+)$/.exec(l.producto.trim());
-      const referencia = m ? m[1] : "—";
-      const descripcion = m ? m[2] : l.producto;
-      const precioUnit = l.cantidadKg > 0 ? l.valor / l.cantidadKg : 0;
-      return `<tr>
-        <td>${i + 1}</td>
-        <td>${esc(referencia)}</td>
-        <td>${esc(descripcion)}</td>
-        <td>—</td>
-        <td style="text-align:right">${fmtMoney(l.cantidadKg)}</td>
-        <td style="text-align:center">KG</td>
-        <td style="text-align:right">$${fmtMoney(precioUnit)}</td>
-        <td style="text-align:center">—</td>
-        <td style="text-align:center">—</td>
-        <td style="text-align:center">—</td>
-        <td style="text-align:right">$${fmtMoney(l.valor)}</td>
-      </tr>`;
-    }).join("");
-
-    return `<div class="page">
-      <table class="header">
-        <tr>
-          <td style="border:none;width:60%">
-            <div class="empresa">${esc(empresa.nombre)}</div>
-            <div class="chico">NIT. ${esc(empresa.nit)}</div>
-            ${empresa.direccion ? `<div class="chico">${esc(empresa.direccion)}${empresa.ciudad ? ` · ${esc(empresa.ciudad)}` : ""}</div>` : ""}
-            ${empresa.telefono ? `<div class="chico">${esc(empresa.telefono)}</div>` : ""}
-            ${empresa.email ? `<div class="chico">${esc(empresa.email)}</div>` : ""}
-          </td>
-          <td style="border:none;text-align:right;vertical-align:top">
-            <div class="titulo">FACTURA ELECTRÓNICA</div>
-            <div class="chico">${esc(numeroOrden)}</div>
-            <div class="chico">Página: 1 de 1</div>
-            ${verificada
-              ? `<div class="chico" style="margin-top:4px;color:#2f8f4e">CUFE verificado ✓</div>`
-              : `<div class="chico" style="margin-top:4px;color:#a33">Sin CUFE/QR — no hay factura Siesa asociada a esta remisión</div>`}
-          </td>
-        </tr>
-      </table>
-      <table class="infobox">
-        <tr><td class="lbl">Señor (es):</td><td colspan="3">${esc(tc(primera.cliente))}</td></tr>
-        <tr>
-          <td class="lbl">Nit o C.C.:</td><td>${esc(primera.nit ?? "—")}</td>
-          <td class="lbl">Forma de Pago:</td><td>CONTADO</td>
-        </tr>
-        <tr>
-          <td class="lbl">Dirección:</td><td>${esc(primera.direccion ?? "—")}</td>
-          <td class="lbl">Medio de Pago:</td><td>CONTADO</td>
-        </tr>
-        <tr>
-          <td class="lbl">Ciudad:</td><td>${esc(tc(primera.destino))}</td>
-          <td class="lbl">Vendedor:</td><td>${esc(primera.vendedor ?? "—")}</td>
-        </tr>
-        <tr>
-          <td class="lbl">Transportador:</td><td>${esc(vehiculo.conductor ?? "—")} · ${esc(vehiculo.placa)}</td>
-          <td class="lbl">Fecha Factura:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td>
-        </tr>
-        <tr>
-          <td class="lbl">No. Remisión:</td><td>${esc(numeroOrden)}</td>
-          <td class="lbl">Fecha de Vcto:</td><td>${esc(vcto)}</td>
-        </tr>
-        <tr>
-          <td class="lbl">Nro. Pedido:</td><td>${esc(primera.codigo ?? numeroOrden)}</td>
-          <td class="lbl">Ruta:</td><td>${esc(nombreRuta(vehiculo, lineas))}</td>
-        </tr>
-      </table>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:24px">Nro</th><th style="width:50px">REF</th><th>Descripción</th><th style="width:45px">Lote</th>
-            <th style="width:60px">Cantidad</th><th style="width:32px">U.M.</th><th style="width:75px">Precio Unit</th>
-            <th style="width:40px">Dscto</th><th style="width:40px">Ipcu</th><th style="width:32px">IVA %</th><th style="width:90px">Valor Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filas}
-        </tbody>
-      </table>
-      <table class="totales">
-        <tr>
-          <td class="lbl">Total Cantidad</td><td>${fmtInt(totalKg)}</td>
-          <td class="lbl">Sub-Total</td><td>$${fmtMoney(totalValor)}</td>
-          <td class="lbl">Total</td><td><b>$${fmtMoney(totalValor)}</b></td>
-        </tr>
-      </table>
-      <p class="letras"><b>Valor Letras:</b> ${esc(valorEnLetras(totalValor))}</p>
-      <p class="letras"><b>Observaciones:</b> —</p>
-      <table class="pie">
-        <tr>
-          <td style="border:none;width:110px;vertical-align:top">
-            ${verificada
-              ? `${qrSvg(primera.qrTexto!)}<div class="chico" style="text-align:center">Escanee para validar</div>`
-              : `<div class="chico">QR no disponible<br/>(sin factura Siesa asociada)</div>`}
-          </td>
-          <td style="border:none;vertical-align:top">
-            <div class="chico"><b>CUFE:</b> ${verificada ? esc(primera.cufe) : "No disponible en esta remisión"}</div>
-            <div class="chico" style="margin-top:2px;word-break:break-all"><b>Firma Digital Electrónica:</b> ${primera.firmaDigital ? esc(primera.firmaDigital) : "no disponible en esta remisión (aún no aprobada por la DIAN o cargada por Excel, sin factura Siesa asociada)"}</div>
-          </td>
-        </tr>
-      </table>
-      <p class="nota">Documento de despacho interno generado por SigRoute a partir de la remisión ${esc(numeroOrden)}${verificada ? " (CUFE, QR y firma digital verificados directo con Siesa)" : ""} — no reemplaza la factura electrónica oficial certificada por Siesa/DIAN.</p>
-    </div>`;
+    const empresa = empresaDe(lineas[0]);
+    return empresa === EMPRESAS.INVERSIONES
+      ? paginaInversiones(numeroOrden, lineas, vehiculo)
+      : paginaAgropecuaria(numeroOrden, lineas, vehiculo);
   }).join("");
 
-  return `<!doctype html><html><head><meta charset="utf-8">${baseHref()}<title>Remisiones ${esc(vehiculo.placa)}</title><style>${CSS_BASE}
-    .header { margin-bottom: 8px; } .header td { border: none; }
-    .empresa { font-size: 14px; font-weight: bold; }
-    .titulo { font-size: 13px; font-weight: bold; }
-    .chico { font-size: 10px; color: #333; }
-    .infobox { margin-bottom: 6px; font-size: 10.5px; }
-    .infobox td { padding: 2px 5px; }
-    .infobox .lbl { font-weight: bold; width: 90px; background: #f4f6f3; }
-    .totales { margin-top: 4px; font-size: 10.5px; }
-    .totales .lbl { font-weight: bold; background: #f4f6f3; text-align: right; }
-    .letras { margin: 4px 0; font-size: 10px; }
-    .pie { margin-top: 8px; } .pie td { border: none; }
-    .nota { margin-top: 8px; font-size: 9px; color: #666; }
+  return `<!doctype html><html><head><meta charset="utf-8">${baseHref()}<title>Remisiones ${esc(vehiculo.placa)}</title><style>${CSS_FACTURA}
+    .agro-header td, .agro-info td { border: none; padding: 1px 4px; }
+    .agro-logo { height: 70px; width: auto; margin-bottom: 2px; }
+    .agro-empresa { font-size: 12.5px; font-weight: bold; }
+    .agro-titulo { font-size: 11px; font-weight: bold; text-align: right; margin: 4px 0; }
+    .agro-campos { margin-left: auto; }
+    .agro-campos td { border: none; padding: 1px 4px; font-size: 9.5px; }
+    .agro-campos .lbl { font-weight: bold; text-align: right; }
+    .agro-info { margin: 8px 0; }
+    .agro-info .lbl { font-weight: bold; width: 95px; }
+    .agro-tabla th, .agro-tabla td { border: 1px solid #333; padding: 3px 5px; font-size: 9.5px; }
+    .agro-totales { width: 260px; margin-left: auto; margin-top: 6px; }
+    .agro-totales td { border: 1px solid #333; padding: 2px 6px; font-size: 9.5px; }
+    .agro-totales .lbl { font-weight: bold; background: #f4f6f3; }
+
+    .inv-header td { border: none; padding: 1px 4px; }
+    .inv-logo { height: 60px; width: auto; }
+    .inv-empresa { font-size: 12px; font-weight: bold; }
+    .inv-titulo { font-size: 11px; font-weight: bold; }
+    .inv-numero { font-weight: bold; border: 1px solid #333; display: inline-block; padding: 1px 8px; margin: 2px 0; }
+    .inv-info { margin: 6px 0; }
+    .inv-info td { border: 1px solid #333; padding: 2px 5px; font-size: 9px; }
+    .inv-info .lbl { font-weight: bold; background: #f4f6f3; }
+    .inv-tabla th, .inv-tabla td { border: 1px solid #333; padding: 3px 4px; font-size: 9px; }
+    .inv-totales { margin-top: 6px; }
+    .inv-totales td { border: 1px solid #333; padding: 2px 6px; font-size: 9.5px; }
+    .inv-totales .lbl { font-weight: bold; background: #f4f6f3; }
+    .inv-impuestos { margin-top: 4px; width: 60%; }
+    .inv-impuestos th, .inv-impuestos td { border: 1px solid #333; padding: 2px 5px; font-size: 9px; }
   </style></head>
   <body onload="setTimeout(function(){window.focus();window.print();},350)">
     ${paginas || '<div class="page"><p>Sin remisiones para imprimir.</p></div>'}
