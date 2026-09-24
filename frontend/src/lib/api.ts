@@ -137,6 +137,7 @@ export interface Vehiculo {
   capacidad: string | null;
   capacidadReal: string | null;
   cubicaje: string | null;
+  precioFlete: string | null;
   empleadores: string | null;
   flotas: string | null;
   estado: string;
@@ -192,13 +193,14 @@ export function getPreasignacionHoy(): Promise<Record<string, PreasignacionHoy>>
 export function setCapacidadReal(
   placa: string,
   capacidadReal: string | null,
-  cubicaje?: string | null
-): Promise<{ placa: string; capacidadReal: string | null; cubicaje: string | null }> {
-  return request<{ placa: string; capacidadReal: string | null; cubicaje: string | null }>(
+  cubicaje?: string | null,
+  precioFlete?: string | null
+): Promise<{ placa: string; capacidadReal: string | null; cubicaje: string | null; precioFlete: string | null }> {
+  return request<{ placa: string; capacidadReal: string | null; cubicaje: string | null; precioFlete: string | null }>(
     "/api/vehiculos/capacidad-real",
     {
       method: "PATCH",
-      body: JSON.stringify({ placa, capacidadReal, cubicaje }),
+      body: JSON.stringify({ placa, capacidadReal, cubicaje, precioFlete }),
     }
   );
 }
@@ -279,6 +281,17 @@ export interface Orden {
   cargado: boolean;
   cargadoAt: string | null;
   createdAt: string;
+  // Fecha de despacho reescribible desde Diagrama (distinta de `fecha`, la de
+  // la factura/Excel importado); si está definida, la orden se agrupa por
+  // esta fecha en vez de "hoy".
+  fechaDespacho?: string | null;
+  // CUFE + texto íntegro del QR de la factura DIAN (solo presentes si la
+  // remisión se cargó escaneando la factura física, flujo TAT/Inversiones).
+  cufe?: string | null;
+  qrTexto?: string | null;
+  // Firma digital electrónica completa: pendiente de un endpoint de Siesa que
+  // aún no existe (verificado en vivo 2026-09-24); siempre null por ahora.
+  firmaDigital?: string | null;
   // Novedad de entrega que llega de Drivin (POD) por producto/remisión.
   reasonName?: string | null;
   reasonCode?: string | null;
@@ -294,6 +307,18 @@ export interface Orden {
 
 export function getOrdenes(all = false): Promise<Orden[]> {
   return request<Orden[]>(`/api/ordenes${all ? "?all=true" : ""}`);
+}
+
+// Reescribe la fecha de despacho de TODAS las líneas de una remisión (mismo
+// numeroOrden). fecha en formato "aaaa-mm-dd"; null/"" la limpia.
+export function editarFechaDespachoOrden(
+  numeroOrden: string,
+  fecha: string | null
+): Promise<{ actualizados: number; numeroOrden: string; fechaDespacho: string | null }> {
+  return request("/api/ordenes/fecha-despacho", {
+    method: "PATCH",
+    body: JSON.stringify({ numeroOrden, fecha }),
+  });
 }
 
 export interface ClienteSinRegistrar {
@@ -336,21 +361,53 @@ export interface FacturaResult {
   totalValor: number;
   origen: string;
   ruta?: string | null;
+  cufe?: string | null;
+  qrTexto?: string | null;
 }
 
 // Consulta una factura directo en Siesa (apiconsulta) por su NumFac y una fecha o
 // rango de fechas (fecFac = inicio, fecFin = fin opcional) y la guarda como orden TAT.
-// ruta = grupo/ruta opcional (ej. "Ruta 1") para organizar en asignación.
+// ruta = grupo/ruta opcional (ej. "Ruta 1") para organizar en asignación. cufe/qrTexto
+// vienen del QR escaneado (verificado) de la factura física; se guardan tal cual.
 export function consultarFactura(
   origen: "AGROPECUARIA" | "INVERSIONES",
   numFac: string,
   fecFac: string,
   fecFin?: string,
-  ruta?: string
+  ruta?: string,
+  cufe?: string,
+  qrTexto?: string
 ): Promise<FacturaResult> {
   return request<FacturaResult>("/api/ordenes/factura", {
     method: "POST",
-    body: JSON.stringify({ origen, numFac, fecFac, fecFin, ruta }),
+    body: JSON.stringify({ origen, numFac, fecFac, fecFin, ruta, cufe, qrTexto }),
+  });
+}
+
+export interface FacturasTodasResult {
+  origen: string;
+  fecha: string;
+  fechaFin: string;
+  totalEncontradas: number;
+  totalRecogidaDescartadas: number;
+  cargadas: number;
+  facturas: { numeroOrden: string; cliente: string; totalKg: number }[];
+  errores: { documento: string; error: string }[];
+}
+
+// Trae TODAS las facturas de despacho de Siesa para un rango de fechas y las
+// carga de una sola vez (sin pistolear/escanear una por una). Las de recogida
+// en planta se descartan automáticamente (esta app se usa de noche, esas no
+// salen esa jornada).
+export function cargarTodasFacturasTat(
+  origen: "AGROPECUARIA" | "INVERSIONES",
+  fecha: string,
+  fechaFin?: string,
+  ruta?: string
+): Promise<FacturasTodasResult> {
+  return request<FacturasTodasResult>("/api/ordenes/factura-todas", {
+    method: "POST",
+    body: JSON.stringify({ origen, fecha, fechaFin, ruta }),
   });
 }
 
@@ -694,6 +751,14 @@ export function getFlotas(): Promise<string[]> {
 // Veces que se ha enviado (replicado) el plan de cada vehículo a Drivin.
 export function getReplicas(): Promise<Record<string, number>> {
   return request<Record<string, number>>("/api/planes/replicas");
+}
+
+// Color asignado a cada ruta (Diagrama y Clientes por Ruta comparten esto).
+export function getColoresRuta(): Promise<Record<string, string>> {
+  return request<Record<string, string>>("/api/planes/colores-ruta");
+}
+export function setColorRuta(ruta: string, color: string | null): Promise<{ ruta: string; color: string | null }> {
+  return request(`/api/planes/colores-ruta`, { method: "PUT", body: JSON.stringify({ ruta, color }) });
 }
 
 export function crearPlan(

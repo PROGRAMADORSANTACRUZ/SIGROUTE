@@ -5,63 +5,11 @@
 import { Router } from "express";
 import { prismaPlan } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
-import { HttpError } from "../../middleware/errorHandler";
-import { env } from "../../config/env";
 import { resolverCiudad } from "../../lib/ciudadesColombia";
+import { esDespacho, fetchFacturasRango, CIA_POR_ORIGEN, type TatInvoiceRaw } from "../../lib/siesaPedido";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("programacion.ver"));
-
-const CIA_POR_ORIGEN: Record<string, string> = { AGROPECUARIA: "3", INVERSIONES: "8" };
-const PAGE_SIZE = 1000;
-
-interface TatInvoiceRaw {
-  nro_documento?: string;
-  fecha_documento?: string;
-  tipo_comercial?: string;
-  cliente_factura?: string;
-  razon_social_cliente?: string;
-  codigo_sucursal?: string;
-  descripcion_sucursal?: string;
-  direccion_sucursal?: string;
-  cantidad_inv?: number;
-  valor_subtotal?: number;
-}
-interface TatInvoicesResponse {
-  has_more?: boolean;
-  next_offset?: number | null;
-  data?: TatInvoiceRaw[];
-}
-
-// Trae TODAS las líneas de un origen en el rango de fechas (paginado), igual
-// que hace SIGCOM internamente para su propio flujo de despacho.
-async function fetchFacturasRango(origen: string, fechaInicio: string, fechaFin: string): Promise<TatInvoiceRaw[]> {
-  const cia = CIA_POR_ORIGEN[origen];
-  if (!cia) return [];
-  const base = origen === "INVERSIONES" ? env.FACTURAS_INV_URL : env.FACTURAS_AGRO_URL;
-  const lineas: TatInvoiceRaw[] = [];
-  let offset = 0;
-  for (let guard = 0; guard < 200; guard++) {
-    const qs = new URLSearchParams({
-      cia, fecha_inicio: fechaInicio, fecha_fin: fechaFin,
-      limit: String(PAGE_SIZE), offset: String(offset),
-      ...(env.CLIENTES_TAT_TOKEN ? { token: env.CLIENTES_TAT_TOKEN } : {}),
-    });
-    let resp: Response;
-    try {
-      resp = await fetch(`${base}?${qs}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20000) });
-    } catch (err) {
-      throw new HttpError(502, `No se pudo conectar con Siesa (${(err as Error)?.name ?? "error"})`);
-    }
-    if (!resp.ok) throw new HttpError(502, `Siesa respondió ${resp.status} para ${origen}`);
-    const json = (await resp.json().catch(() => ({}))) as TatInvoicesResponse;
-    lineas.push(...(json.data ?? []));
-    const nextOffset = json.next_offset;
-    if (json.has_more && typeof nextOffset === "number") offset = nextOffset;
-    else break;
-  }
-  return lineas;
-}
 
 // Limpia "3202 - CANUTA COMESTIBLE" -> "CANUTA COMESTIBLE" (igual que en órdenes).
 function limpiarProducto(tipo: string): string {
@@ -98,7 +46,9 @@ router.get("/", async (req, res, next) => {
     for (const o of origenes) {
       if (!CIA_POR_ORIGEN[o]) continue;
       const filas = await fetchFacturasRango(o, fecha, fechaFin);
-      for (const f of filas) todas.push({ ...f, origen: o });
+      // Esta página es para decidir rutas de despacho de la noche; los
+      // pedidos de recogida en planta no salen esa jornada, se descartan.
+      for (const f of filas) if (esDespacho(f.pedido_notas)) todas.push({ ...f, origen: o });
     }
 
     // Lista de productos disponibles en TODO el rango (antes de filtrar), para

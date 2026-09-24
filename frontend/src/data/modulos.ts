@@ -13,7 +13,7 @@ export interface Modulo {
 export const MODULOS: Modulo[] = [
   // ── Planeación (módulos originales de rutas_web) ───────────────────────
   { key: "/dashboard?panel=planeacion", label: "Dashboard", grupo: "Planeación", permiso: "dashboard.planeacion.ver" },
-  { key: "/planeacion/preplanificacion", label: "Pre-planificación", grupo: "Planeación", permiso: "programacion.ver" },
+  { key: "/planeacion/preplanificacion", label: "Preplanificación Siesa", grupo: "Planeación", permiso: "programacion.ver" },
   { key: "/planeacion/programacion", label: "Planificación", grupo: "Planeación", permiso: "programacion.ver" },
   { key: "/planeacion/asignacion", label: "Preasignación", grupo: "Planeación", permiso: "asignacion.ver" },
   { key: "/planeacion/areas", label: "Áreas para Cargar", grupo: "Planeación", permiso: "areas.ver" },
@@ -26,6 +26,7 @@ export const MODULOS: Modulo[] = [
   { key: "/ordenes", label: "Cargar Órdenes", grupo: "Ejecución", permiso: "distrilog.ordenes.ver" },
   { key: "/asignacion-vehiculos", label: "Asignación de órdenes", grupo: "Ejecución", permiso: "distrilog.asignacion.ver" },
   { key: "/planes", label: "Diagrama", grupo: "Ejecución", permiso: "distrilog.planes.ver" },
+  { key: "/clientes-rutas", label: "Clientes por Ruta", grupo: "Ejecución", permiso: "distrilog.planes.ver" },
   { key: "/planificacion-dl", label: "Planificación D.L.", grupo: "Ejecución", permiso: "distrilog.planificacion_dl.ver" },
   { key: "/historicos", label: "Históricos", grupo: "Ejecución", permiso: "distrilog.historicos.ver" },
   { key: "/nivel-de-servicio", label: "Nivel de servicio", grupo: "Ejecución", permiso: "distrilog.nivel_servicio.ver" },

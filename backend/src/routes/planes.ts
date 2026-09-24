@@ -705,4 +705,36 @@ router.post("/agregar", requirePermiso("distrilog.planes.editar"), async (req, r
   }
 });
 
+// GET /api/planes/colores-ruta -> {ruta: color} para pintar Diagrama y
+// Clientes por Ruta con el mismo color en ambas pantallas.
+router.get("/colores-ruta", async (_req, res, next) => {
+  try {
+    const colores = await prisma.rutaColor.findMany();
+    res.json(Object.fromEntries(colores.map((c) => [c.ruta, c.color])));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/planes/colores-ruta  { ruta, color: "#rrggbb" | null }
+router.put("/colores-ruta", requirePermiso("distrilog.planes.editar"), async (req, res, next) => {
+  try {
+    const ruta = String(req.body?.ruta ?? "").trim();
+    if (!ruta) throw new HttpError(400, "Falta la ruta");
+    const color = req.body?.color ? String(req.body.color).trim() : null;
+    if (!color) {
+      await prisma.rutaColor.deleteMany({ where: { ruta } });
+      return res.json({ ruta, color: null });
+    }
+    const guardado = await prisma.rutaColor.upsert({
+      where: { ruta },
+      update: { color },
+      create: { ruta, color },
+    });
+    res.json({ ruta: guardado.ruta, color: guardado.color });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

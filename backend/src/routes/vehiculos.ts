@@ -121,12 +121,12 @@ router.get("/externos", requireAuth, async (_req, res, next) => {
     // Adjunta los valores guardados localmente (override por placa).
     const locales = await prisma.vehiculo.findMany({
       where: {
-        OR: [{ capacidadReal: { not: null } }, { cubicaje: { not: null } }],
+        OR: [{ capacidadReal: { not: null } }, { cubicaje: { not: null } }, { precioFlete: { not: null } }],
       },
-      select: { placa: true, capacidadReal: true, cubicaje: true },
+      select: { placa: true, capacidadReal: true, cubicaje: true, precioFlete: true },
     });
     const overridePorPlaca = new Map(
-      locales.map((l) => [l.placa, { capacidadReal: l.capacidadReal, cubicaje: l.cubicaje }])
+      locales.map((l) => [l.placa, { capacidadReal: l.capacidadReal, cubicaje: l.cubicaje, precioFlete: l.precioFlete }])
     );
     const mapped = list.map((v) => {
       const base = mapVehiculo(v);
@@ -135,6 +135,7 @@ router.get("/externos", requireAuth, async (_req, res, next) => {
         ...base,
         capacidadReal: ov?.capacidadReal ?? null,
         cubicaje: ov?.cubicaje ?? null,
+        precioFlete: ov?.precioFlete ?? null,
       };
     });
     res.json(mapped.sort((a, b) => a.placa.localeCompare(b.placa)));
@@ -164,6 +165,13 @@ const capacidadRealSchema = z.object({
       if (v == null || v === "") return null;
       return String(v);
     }),
+  precioFlete: z
+    .union([z.string().trim(), z.number(), z.null()])
+    .optional()
+    .transform((v) => {
+      if (v == null || v === "") return null;
+      return String(v);
+    }),
 });
 
 router.patch("/capacidad-real", requireAuth, requirePermiso("config.vehiculos.editar"), async (req, res, next) => {
@@ -172,16 +180,17 @@ router.patch("/capacidad-real", requireAuth, requirePermiso("config.vehiculos.ed
     if (!parsed.success) {
       throw new HttpError(400, parsed.error.issues[0].message);
     }
-    const { placa, capacidadReal, cubicaje } = parsed.data;
+    const { placa, capacidadReal, cubicaje, precioFlete } = parsed.data;
     const vehiculo = await prisma.vehiculo.upsert({
       where: { placa },
-      update: { capacidadReal: capacidadReal ?? null, cubicaje: cubicaje ?? null },
-      create: { placa, capacidadReal: capacidadReal ?? null, cubicaje: cubicaje ?? null },
+      update: { capacidadReal: capacidadReal ?? null, cubicaje: cubicaje ?? null, precioFlete: precioFlete ?? null },
+      create: { placa, capacidadReal: capacidadReal ?? null, cubicaje: cubicaje ?? null, precioFlete: precioFlete ?? null },
     });
     res.json({
       placa: vehiculo.placa,
       capacidadReal: vehiculo.capacidadReal,
       cubicaje: vehiculo.cubicaje,
+      precioFlete: vehiculo.precioFlete,
     });
   } catch (err) {
     next(err);

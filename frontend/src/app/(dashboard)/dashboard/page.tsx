@@ -14,7 +14,7 @@ import {
   type Planilla,
   type VehiculoExterno,
 } from "@/lib/api";
-import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, type ComparativoAdmin } from "@/lib/planApi";
+import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, getComparativoClientes, rellenarEjecutado, type ComparativoAdmin, type ComparativoClientes } from "@/lib/planApi";
 import { getErrandsDashboard, type ErrandsDashboard } from "@/lib/errandsApi";
 import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
@@ -289,6 +289,33 @@ function DashboardPageInner() {
   useEffect(() => {
     if (vista === "comparativo") cargarComparativo();
   }, [vista, cargarComparativo]);
+
+  // ── Comparativo por CLIENTE (Programación vs Órdenes ejecutadas) ──
+  const [compClientes, setCompClientes] = useState<ComparativoClientes | null>(null);
+  const [compClientesLoading, setCompClientesLoading] = useState(true);
+  const [rellenando, setRellenando] = useState(false);
+
+  const cargarComparativoClientes = useCallback(() => {
+    setCompClientesLoading(true);
+    getComparativoClientes(compFecha)
+      .then(setCompClientes)
+      .catch(() => setCompClientes(null))
+      .finally(() => setCompClientesLoading(false));
+  }, [compFecha]);
+
+  useEffect(() => {
+    if (vista === "comparativo") cargarComparativoClientes();
+  }, [vista, cargarComparativoClientes]);
+
+  async function handleRellenarEjecutado() {
+    setRellenando(true);
+    try {
+      await rellenarEjecutado(compFecha);
+      cargarComparativoClientes();
+    } finally {
+      setRellenando(false);
+    }
+  }
 
   const rutasCerradas = resumenPlan?.rutas.filter((r) => r.cerrada).length ?? 0;
   const pctRutasAsignadas = resumenPlan && resumenPlan.conteos.rutas > 0 ? Math.round((resumenPlan.conteos.rutasAsignadas / resumenPlan.conteos.rutas) * 100) : 0;
@@ -1193,15 +1220,107 @@ function DashboardPageInner() {
           <div className="flex flex-wrap items-center gap-2">
             <input type="date" value={compFecha} onChange={(e) => setCompFecha(e.target.value)}
               className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            <button onClick={cargarComparativo} className="rounded-lg border border-[#dfe4e0] bg-white px-4 py-2 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">Actualizar</button>
-            <span className="text-xs text-[#7a8794]">Kg planificados en Preasignación vs kg reales en planillas de despacho, por vehículo.</span>
+            <button onClick={() => { cargarComparativo(); cargarComparativoClientes(); }} className="rounded-lg border border-[#dfe4e0] bg-white px-4 py-2 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">Actualizar</button>
+            <span className="text-xs text-[#7a8794]">Kg planificados vs kg reales, por vehículo y por cliente.</span>
           </div>
 
-          {compLoading || !compData ? (
+          <h3 className="mt-1 text-sm font-bold text-[#14352a]">Por cliente — Programación vs Ejecución (Diagrama)</h3>
+          {compClientesLoading || !compClientes ? (
             <div className="flex flex-1"><PageLoader /></div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+              {!compClientes.hayPlanificacion && compClientes.totales.ejecutado > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#f0dfa8] bg-[#fdf6e9] px-4 py-3 text-sm text-[#7a5b0f]">
+                  <span>Todavía no hay nada planificado a mano para esta fecha, pero ya hay {fmtKg(compClientes.totales.ejecutado)} kg ejecutados en Diagrama. Puedes usarlos como planificación inicial.</span>
+                  <button onClick={handleRellenarEjecutado} disabled={rellenando} className="shrink-0 rounded-lg bg-[#2f8f4e] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#277a42] disabled:opacity-60">
+                    {rellenando ? "Llenando…" : "Llenar con lo ejecutado"}
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+                <StatCard label="Kg planificados" value={fmtKg(compClientes.totales.planificado)} color="#1a5fb4"
+                  icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>} />
+                <StatCard label="Kg ejecutados" value={fmtKg(compClientes.totales.ejecutado)} color="#2f8f4e"
+                  icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>} />
+                <StatCard label="% Cumplimiento" value={`${compClientes.totales.pctCumplimiento}%`}
+                  color={compClientes.totales.pctCumplimiento >= 100 ? "#2f8f4e" : compClientes.totales.pctCumplimiento >= 80 ? "#a86a12" : "#b3261e"} />
+                <StatCard label="Kg perdidos" sub="planificado sin ejecutar" value={fmtKg(compClientes.totales.perdido)} color="#b3261e" bg={compClientes.totales.perdido > 0 ? "bg-[#fbeceb]" : "bg-white"} />
+                <StatCard label="Kg extra" sub="ejecutado sin plan" value={fmtKg(compClientes.totales.extra)} color="#a86a12" bg={compClientes.totales.extra > 0 ? "bg-[#fdf6e9]" : "bg-white"} />
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[240px_1fr]">
+                <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
+                  <DonutChart
+                    segments={[
+                      { value: Math.max(0, compClientes.totales.ejecutado - compClientes.totales.extra), color: "#2f8f4e", label: "Cumplido" },
+                      { value: compClientes.totales.perdido, color: "#b3261e", label: "Perdido" },
+                      { value: compClientes.totales.extra, color: "#a86a12", label: "Extra" },
+                    ]}
+                    centerLabel={`${compClientes.totales.pctCumplimiento}%`}
+                    centerSub="cumplido"
+                  />
+                  <div className="flex flex-wrap justify-center gap-3 text-[11px] text-[#5f7a68]">
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#2f8f4e]" /> Cumplido</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#b3261e]" /> Perdido</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#a86a12]" /> Extra</span>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2.5 rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#9aa4af]">Kg por categoría — planificado vs ejecutado</p>
+                  {compClientes.porCategoria.map((c) => {
+                    const max = Math.max(1, c.planificado, c.ejecutado);
+                    return (
+                      <div key={c.clave} className="flex flex-col gap-1">
+                        <HBar label={c.etiqueta} value={c.planificado} max={max} color="#1a5fb4" sub={fmtKg(c.planificado)} />
+                        <HBar label="" value={c.ejecutado} max={max} color="#2f8f4e" sub={fmtKg(c.ejecutado)} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#e1e9dd] bg-white shadow-sm">
+                {compClientes.filas.length === 0 ? (
+                  <div className="flex h-24 items-center justify-center text-sm text-[#7a8794]">Sin datos para esta fecha.</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-[#e1e9dd] bg-[#f7faf5] text-left text-xs font-semibold uppercase tracking-wide text-[#7a8794]">
+                      <tr>
+                        <th className="px-3 py-2.5">Cliente</th>
+                        <th className="px-3 py-2.5 text-right">Planificado (kg)</th>
+                        <th className="px-3 py-2.5 text-right">Ejecutado (kg)</th>
+                        <th className="px-3 py-2.5 text-right">Diferencia</th>
+                        <th className="px-3 py-2.5 text-right">Desviación</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f0f2ee]">
+                      {compClientes.filas.slice(0, 30).map((f) => {
+                        const alerta = Math.abs(f.pctDesviacion) >= 15;
+                        return (
+                          <tr key={f.clienteId} className={alerta ? "bg-[#fdf6e9]" : "hover:bg-[#f9fbf7]"}>
+                            <td className="px-3 py-2 text-xs font-semibold text-[#14352a]">{f.nombre}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1a5fb4]">{fmtN(f.planificado)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#2f8f4e]">{fmtN(f.ejecutado)}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums font-semibold ${f.diferencia > 0 ? "text-[#a86a12]" : f.diferencia < 0 ? "text-[#b3261e]" : "text-[#5f7a68]"}`}>
+                              {f.diferencia > 0 ? "+" : ""}{fmtN(f.diferencia)}
+                            </td>
+                            <td className={`px-3 py-2 text-right text-xs font-semibold ${alerta ? "text-[#a86a12]" : "text-[#9aa4af]"}`}>{f.pctDesviacion}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+
+          <h3 className="mt-3 text-sm font-bold text-[#14352a]">Por vehículo — Preasignación vs planillas de despacho</h3>
+          {compLoading || !compData ? (
+            <div className="flex flex-1"><PageLoader /></div>
+          ) : (
+            <>              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                 <StatCard label="Kg planificados" value={fmtN(compData.totales.planificado)} color="#1a5fb4"
                   icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>} />
                 <StatCard label="Kg ejecutados" value={fmtN(compData.totales.ejecutado)} color="#2f8f4e"

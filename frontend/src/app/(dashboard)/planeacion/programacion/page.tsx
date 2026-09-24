@@ -10,6 +10,8 @@ import { IconBox, IconDiagrama, IconLock, IconLockOpen, IconPrinter, IconUsers }
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import SearchInput from "@/components/SearchInput";
+import PegarExcelModal from "@/components/planeacion/PegarExcelModal";
+import type { ResultadoPegado } from "@/lib/pegarProgramacion";
 
 const CANASTILLA_KG = 1.9; // cada canastilla suma 1.9 kg al total (igual que el original)
 const POR_PAGINA = 50;
@@ -47,6 +49,7 @@ export default function ProgramacionPage() {
   const [soloConCarga, setSoloConCarga] = useState(false);
   const [orden, setOrden] = useState<"nombre" | "kg_desc" | "kg_asc">("nombre");
   const [pagina, setPagina] = useState(1);
+  const [pegarAbierto, setPegarAbierto] = useState(false);
   const tablaRef = useRef<HTMLTableElement>(null);
   const { showToast } = useToast();
   const { confirm } = useConfirm();
@@ -156,6 +159,28 @@ export default function ProgramacionPage() {
     }
   }
 
+  // Aplica lo detectado en el modal "Pegar desde Excel" a la grilla en
+  // memoria (no guarda solo): el usuario revisa y luego pulsa Guardar, igual
+  // que si hubiera tecleado los valores a mano.
+  function aplicarPegado(r: ResultadoPegado) {
+    if (!data) return;
+    setValores((prev) => {
+      const next = { ...prev };
+      for (const fila of r.filas) {
+        if (!fila.destinoId) continue;
+        const actual = { ...(next[fila.destinoId] ?? {}) };
+        for (const [campo, valor] of Object.entries(fila.valores)) {
+          if (editableCols.has(campo)) actual[campo] = String(valor);
+        }
+        next[fila.destinoId] = actual;
+      }
+      return next;
+    });
+    const n = r.filas.filter((f) => f.destinoId).length;
+    showToast(`${n} destino(s) actualizados en la grilla — revisa y pulsa Guardar.`, "success");
+    setPegarAbierto(false);
+  }
+
   // Enter salta a la siguiente celda editable visible de la grilla (igual que el original).
   function onEnterNext(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter" || !tablaRef.current) return;
@@ -176,6 +201,12 @@ export default function ProgramacionPage() {
           <>
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
             {data?.canEditar && (
+              <button onClick={() => setPegarAbierto(true)} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /></svg>
+                Pegar desde Excel
+              </button>
+            )}
+            {data?.canEditar && (
               <button onClick={guardar} className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42]">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
                 Guardar
@@ -186,6 +217,14 @@ export default function ProgramacionPage() {
         }
       />
       <p className="mb-3 hidden text-sm text-[#45505e] print:block">Fecha: {fecha}</p>
+      {pegarAbierto && data && (
+        <PegarExcelModal
+          categorias={data.categorias}
+          destinos={data.destinos}
+          onAplicar={aplicarPegado}
+          onClose={() => setPegarAbierto(false)}
+        />
+      )}
 
       {loading || !data ? (
         <PageLoader />

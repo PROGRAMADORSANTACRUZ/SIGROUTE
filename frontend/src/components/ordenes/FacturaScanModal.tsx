@@ -18,8 +18,10 @@ function esNavegadorInApp(): boolean {
   return /(FBAN|FBAV|Instagram|WhatsApp|Line|TikTok|MicroMessenger)/i.test(ua);
 }
 
-// Extrae NumFac y FecFac del contenido del QR de la factura electrónica (DIAN).
-function parseQR(texto: string): { numFac: string; fecFac: string } | null {
+// Extrae NumFac, FecFac y CUFE del contenido del QR de la factura electrónica
+// (DIAN). El QR no trae la firma digital completa (solo CUFE + resumen +
+// URL de validación), así que esa sigue sin poder capturarse por este medio.
+function parseQR(texto: string): { numFac: string; fecFac: string; cufe: string | null } | null {
   const map = new Map<string, string>();
   for (const linea of texto.split(/\r?\n/)) {
     const i = linea.indexOf(":");
@@ -28,8 +30,9 @@ function parseQR(texto: string): { numFac: string; fecFac: string } | null {
   }
   const numFac = map.get("numfac") ?? "";
   const fecFac = (map.get("fecfac") ?? "").slice(0, 10);
+  const cufe = map.get("cufe") || null;
   if (!numFac) return null;
-  return { numFac, fecFac };
+  return { numFac, fecFac, cufe };
 }
 
 export default function FacturaScanModal({
@@ -71,18 +74,26 @@ export default function FacturaScanModal({
 
   // Guarda una factura (por NumFac y fecha o rango de fechas) y la agrega a la lista.
   const guardar = useCallback(
-    async (numFac: string, fecFac: string, fecFin?: string) => {
+    async (numFac: string, fecFac: string, fecFin?: string, cufe?: string | null, qrTexto?: string | null) => {
       if (procesandoRef.current) return;
       procesandoRef.current = true;
       setBuscando(true);
       setError(null);
       try {
-        const r = await consultarFactura(origen, numFac, fecFac || new Date().toISOString().slice(0, 10), fecFin, rutaRef.current.trim() || undefined);
+        const r = await consultarFactura(
+          origen,
+          numFac,
+          fecFac || new Date().toISOString().slice(0, 10),
+          fecFin,
+          rutaRef.current.trim() || undefined,
+          cufe ?? undefined,
+          qrTexto ?? undefined
+        );
         setResultados((prev) =>
           prev.some((x) => x.numeroOrden === r.numeroOrden) ? prev : [r, ...prev]
         );
         setUltima(r.numeroOrden);
-        flash(true, `Factura ${r.numeroOrden} encontrada ✓`);
+        flash(true, `Factura ${r.numeroOrden} encontrada ✓${r.cufe ? " · CUFE verificado" : ""}`);
         onSaved();
       } catch (err) {
         const msg = err instanceof ApiError ? err.message : "No se pudo consultar la factura";
@@ -112,7 +123,7 @@ export default function FacturaScanModal({
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         const p = parseQR(buffer);
-        if (p) guardar(p.numFac, p.fecFac);
+        if (p) guardar(p.numFac, p.fecFac, undefined, p.cufe, buffer);
         buffer = "";
       }, 160);
     };
@@ -211,7 +222,7 @@ export default function FacturaScanModal({
               }
               if (texto) {
                 const p = parseQR(texto);
-                if (p) guardar(p.numFac, p.fecFac);
+                if (p) guardar(p.numFac, p.fecFac, undefined, p.cufe, texto);
               }
             } catch { /* frame ilegible */ }
           }

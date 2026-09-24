@@ -755,6 +755,9 @@ model Vehiculo {
   capacidad         String?
   capacidadReal     String?
   cubicaje          String?
+  // Precio del flete por viaje/carro; se cruza con los kilos despachados de
+  // sus rutas en Diagrama para mostrar cuánto vale cada kg transportado.
+  precioFlete       String?
   empleadores       String?
   flotas            String?
   estado            String   @default("Activo")
@@ -784,6 +787,20 @@ model Orden {
   distribucion String  @default("AGROPECUARIA")
   tatOrigen    String?
 
+  // CUFE + texto íntegro del QR de la factura electrónica DIAN, capturados al
+  // escanear la factura física (flujo TAT/Inversiones); null en órdenes
+  // cargadas por Excel (Bovino/Porcino), que nunca pasan por el escáner.
+  // El QR de la DIAN no trae la firma digital completa (solo CUFE + resumen +
+  // URL de validación), así que esa sigue sin poder reproducirse.
+  cufe    String?
+  qrTexto String? @db.Text
+  // Firma digital electrónica completa de la factura (texto/base64), pendiente
+  // de que se habilite el endpoint de Siesa que la expone — verificado en vivo
+  // 2026-09-24 que "ventas/facturas-agropecuaria-tat"/"facturas-tat-inversiones"
+  // NO la traen (solo cliente/producto/valor/kg). Campo listo, queda null hasta
+  // que ese endpoint exista.
+  firmaDigital String? @db.Text
+
   podCode       String?
   scenarioToken String?
   deliveredBy   String?
@@ -797,6 +814,10 @@ model Orden {
 
   asignadoVehiculo String?
   ruta             String?
+  // Fecha de despacho editable (distinta de `fecha`, que viene fija del
+  // Excel/factura importada); si se define, la orden se muestra agrupada en
+  // Diagrama bajo esta fecha en vez de "hoy".
+  fechaDespacho DateTime?
 
   createdAt DateTime @default(now())
 
@@ -806,6 +827,16 @@ model Orden {
   @@index([estado])
   @@index([fecha])
   @@index([ruta])
+}
+
+// Color asignado a una ruta (por nombre, ej. "Ruta 3") para que se vea
+// igual visualmente en Diagrama y en la página de Clientes por Ruta.
+model RutaColor {
+  ruta      String   @id @db.VarChar(60)
+  color     String   @db.VarChar(9)
+  updatedAt DateTime @updatedAt
+
+  @@map("ruta_colores")
 }
 
 model Cliente {

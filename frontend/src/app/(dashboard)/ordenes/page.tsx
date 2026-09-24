@@ -5,6 +5,7 @@ import { tc, btn } from "@/lib/utils";
 import SearchInput from "@/components/SearchInput";
 import ClienteFormModal from "@/components/cliente/ClienteFormModal";
 import FacturaScanModal from "@/components/ordenes/FacturaScanModal";
+import CargarSiesaModal from "@/components/ordenes/CargarSiesaModal";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
 import {
@@ -307,6 +308,7 @@ export default function OrdenesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tipoRef = useRef<"B" | "P" | "I" | null>(null);
   const [scanOrigen, setScanOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
+  const [cargarSiesaOrigen, setCargarSiesaOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -739,7 +741,7 @@ export default function OrdenesPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (cat.isTat && cat.syncOrigen) setScanOrigen(cat.syncOrigen);
+                                if (cat.isTat && cat.syncOrigen) setCargarSiesaOrigen(cat.syncOrigen);
                                 else if (cat.tipo) triggerImport(cat.tipo);
                               }}
                               disabled={importing}
@@ -772,7 +774,7 @@ export default function OrdenesPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (cat.isTat && cat.syncOrigen) setScanOrigen(cat.syncOrigen);
+                          if (cat.isTat && cat.syncOrigen) setCargarSiesaOrigen(cat.syncOrigen);
                           else if (cat.tipo) triggerImport(cat.tipo);
                         }}
                         disabled={importing || !puedeEditar}
@@ -899,7 +901,7 @@ export default function OrdenesPage() {
                 )}
                 {puedeEditar && (activeCat.isTat ? (
                   <button
-                    onClick={() => activeCat.syncOrigen && setScanOrigen(activeCat.syncOrigen)}
+                    onClick={() => activeCat.syncOrigen && setCargarSiesaOrigen(activeCat.syncOrigen)}
                     className={btn}
                   >
                     <IconScan />
@@ -1518,6 +1520,15 @@ export default function OrdenesPage() {
           clientes={clientesDb}
           onClose={() => setAsignarTarget(null)}
           onAsignar={handleAsignar}
+        />
+      )}
+
+      {cargarSiesaOrigen && (
+        <CargarSiesaModal
+          origen={cargarSiesaOrigen}
+          onEscanear={() => { setScanOrigen(cargarSiesaOrigen); setCargarSiesaOrigen(null); }}
+          onDone={() => load()}
+          onClose={() => setCargarSiesaOrigen(null)}
         />
       )}
 

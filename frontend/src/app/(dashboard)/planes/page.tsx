@@ -1,11 +1,14 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   ApiError,
   agregarAPlan,
   asignarOrdenes,
   crearPlan,
+  editarFechaDespachoOrden,
+  getColoresRuta,
   getFlotas,
   getOrdenes,
   getPlanes,
@@ -23,6 +26,12 @@ import { SkeletonVehicleCard } from "@/components/Loading";
 import QuitarRemisionModal from "@/components/QuitarRemisionModal";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
+import {
+  docConsolidadoInversiones,
+  docConsolidadoTat,
+  docRemisionesRuta,
+  imprimirDocumentoDiagrama,
+} from "@/lib/diagramaDocs";
 
 const fmtKg = (n: number) => n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
 
@@ -57,6 +66,13 @@ function consolidarRemisiones(ords: Orden[]): RemisionRow[] {
   return Array.from(m.values());
 }
 
+// Nombre de la ruta a mostrar/exportar: el que traigan las órdenes (campo
+// Orden.ruta, ej. "RUTA 3") o, si ninguna lo tiene, la placa del vehículo.
+function nombreRutaGrupo(ords: Orden[], vehiculo: VehiculoExterno): string {
+  const conRuta = ords.find((o) => o.ruta?.trim());
+  return conRuta?.ruta?.trim() || `Vehículo ${vehiculo.placa}`;
+}
+
 type VehOrdenes = {
   vehiculo: VehiculoExterno;
   ordenes: Orden[];
@@ -83,6 +99,12 @@ export default function DiagramaPage() {
   const [editVeh, setEditVeh] = useState<string | null>(null);
   const [moviendo, setMoviendo] = useState(false);
   const [editRemision, setEditRemision] = useState<{ numeroOrden: string; kg: number; ords: Orden[]; placa: string } | null>(null);
+  const [coloresRuta, setColoresRuta] = useState<Record<string, string>>({});
+  // Modal de impresión (Ruta = remisiones individuales, Consolidado = resumen)
+  // que pide elegir plantilla porque TAT e Inversiones usan formatos distintos.
+  const [plantillaModal, setPlantillaModal] = useState<{ vehiculo: VehiculoExterno; ordenes: Orden[]; tipo: "ruta" | "consolidado" } | null>(null);
+  const [fechaModal, setFechaModal] = useState<{ numeroOrden: string; fecha: string } | null>(null);
+  const [guardandoFecha, setGuardandoFecha] = useState(false);
 
   const [showPlanes, setShowPlanes] = useState(false);
   const [planes, setPlanes] = useState<Plan[]>([]);
@@ -113,6 +135,7 @@ export default function DiagramaPage() {
       setVehiculos(vehs);
       setOrdenes(ords);
       getReplicas().then(setReplicas).catch(() => { /* opcional */ });
+      getColoresRuta().then(setColoresRuta).catch(() => { /* opcional */ });
       setChecked((prev) => {
         if (prev.size > 0) return prev;
         return new Set(); // sin marcar por defecto
@@ -198,6 +221,68 @@ export default function DiagramaPage() {
 
   function selectAll() { setChecked(new Set(grupos.map((g) => g.vehiculo.placa.toUpperCase()))); }
   function deselectAll() { setChecked(new Set()); }
+
+  // Elige la plantilla (TAT/Inversiones) e imprime: "ruta" = una página por
+  // remisión (formato factura Siesa, cambia el encabezado según la razón
+  // social de cada remisión); "consolidado" = resumen (sí depende de la
+  // variante elegida porque TAT e Inversiones usan formatos distintos).
+  function confirmarImpresion(variante: "TAT" | "INVERSIONES") {
+    if (!plantillaModal) return;
+    const { vehiculo, ordenes: ords, tipo } = plantillaModal;
+    if (tipo === "consolidado") {
+      imprimirDocumentoDiagrama(variante === "TAT" ? docConsolidadoTat(vehiculo, ords) : docConsolidadoInversiones(vehiculo, ords));
+    } else {
+      imprimirDocumentoDiagrama(docRemisionesRuta(vehiculo, ords));
+    }
+    setPlantillaModal(null);
+  }
+
+  function abrirFechaModal(numeroOrden: string, fechaActual: string | null | undefined) {
+    setFechaModal({ numeroOrden, fecha: fechaActual ? fechaActual.slice(0, 10) : "" });
+  }
+
+  async function guardarFechaDespacho() {
+    if (!fechaModal) return;
+    setGuardandoFecha(true);
+    setError(null);
+    try {
+      await editarFechaDespachoOrden(fechaModal.numeroOrden, fechaModal.fecha || null);
+      setFechaModal(null);
+      await load(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la fecha");
+    } finally {
+      setGuardandoFecha(false);
+    }
+  }
+
+  // Excel con todo el diagrama visible (una hoja de resumen por vehículo/ruta
+  // + el detalle de remisiones), construido en el navegador (sin ir al backend).
+  function exportarExcel() {
+    const wb = XLSX.utils.book_new();
+    const resumen: (string | number)[][] = [["Placa", "Conductor", "Flota", "Ruta", "Remisiones", "Kg cargados", "Capacidad", "Precio flete", "$/kg"]];
+    for (const g of filtrados) {
+      const ruta = nombreRutaGrupo(g.ordenes, g.vehiculo);
+      const flete = g.vehiculo.precioFlete ? Number(g.vehiculo.precioFlete) : null;
+      resumen.push([
+        g.vehiculo.placa, g.vehiculo.conductor ?? "", g.vehiculo.flotas ?? "", ruta,
+        consolidarRemisiones(g.ordenes).length, Math.round(g.totalKg),
+        g.vehiculo.capacidad ?? "", flete ?? "", flete && g.totalKg ? Number((flete / g.totalKg).toFixed(0)) : "",
+      ]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), "Resumen");
+
+    const detalle: (string | number)[][] = [["Placa", "Ruta", "No. Orden", "Cliente", "Destino", "Kg", "Estado"]];
+    for (const g of filtrados) {
+      const ruta = nombreRutaGrupo(g.ordenes, g.vehiculo);
+      for (const r of consolidarRemisiones(g.ordenes)) {
+        detalle.push([g.vehiculo.placa, ruta, r.numeroOrden, tc(r.cliente), tc(r.destino), Math.round(r.cantidadKg), r.enviado ? "Enviado" : "Pendiente"]);
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detalle), "Detalle");
+
+    XLSX.writeFile(wb, `diagrama-${hoy()}.xlsx`);
+  }
 
   // Mueve todas las líneas de una remisión a otro vehículo (o la quita si placa=null).
   async function moverRemision(numeroOrden: string, ordsVehiculo: Orden[], placa: string | null) {
@@ -333,6 +418,10 @@ export default function DiagramaPage() {
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
             Ver planes Drivin
           </button>
+          <button onClick={exportarExcel} disabled={filtrados.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-40">
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Descargar Excel
+          </button>
           {puedeEditar && (
             <button onClick={iniciarEnvio} disabled={checkedVehiculos.length === 0}
               className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-40">
@@ -379,8 +468,13 @@ export default function DiagramaPage() {
               const rem = consolidarRemisiones(ords);
               const remEnviadas = rem.filter((r) => r.enviado).length;
               const isEditing = editVeh === v.id;
+              const rutaNombre = nombreRutaGrupo(ords, v);
+              const colorRuta = coloresRuta[rutaNombre];
+              const precioFlete = v.precioFlete ? Number(v.precioFlete) : null;
+              const costoPorKg = precioFlete && totalKg > 0 ? precioFlete / totalKg : null;
               return (
-                <div key={v.id} className={`flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${isChecked ? "border-[#2f8f4e] ring-1 ring-[#2f8f4e]/30" : "border-[#e1e9dd]"}`}>
+                <div key={v.id} className={`flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${isChecked ? "border-[#2f8f4e] ring-1 ring-[#2f8f4e]/30" : "border-[#e1e9dd]"}`}
+                  style={colorRuta ? { borderLeft: `6px solid ${colorRuta}` } : undefined}>
                   <div className="flex items-center gap-3 bg-[#14352a] px-4 py-3">
                     <button onClick={() => toggleCheck(v.placa)}
                       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border-2 transition-colors ${isChecked ? "border-[#2f8f4e] bg-[#2f8f4e] text-white" : "border-white/40 bg-transparent"}`}
@@ -420,12 +514,15 @@ export default function DiagramaPage() {
 
                   <div className="bg-[#f7faf5] px-4 py-2">
                     <div className="mb-1 flex justify-between text-xs text-[#5f7a68]">
-                      <span>{fmtKg(totalKg)} kg cargados</span>
+                      <span>{fmtKg(totalKg)} kg cargados{colorRuta ? ` · ${rutaNombre}` : ""}</span>
                       <span className={pct > 95 ? "font-semibold text-[#b3261e]" : ""}>{pct.toFixed(0)}%</span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e1e9dd]">
                       <div className={`h-1.5 rounded-full transition-all ${pct > 95 ? "bg-[#b3261e]" : pct > 70 ? "bg-[#b5941e]" : "bg-[#2f8f4e]"}`} style={{ width: `${pct}%` }} />
                     </div>
+                    {costoPorKg != null && (
+                      <p className="mt-1 text-xs text-[#a86a12]">Flete ${fmtKg(precioFlete!)} · ${costoPorKg.toFixed(0)}/kg</p>
+                    )}
                   </div>
 
                   <div className="nice-scroll max-h-48 overflow-auto">
@@ -435,15 +532,29 @@ export default function DiagramaPage() {
                           <th className="px-4 py-1.5 font-semibold">No. Orden</th>
                           <th className="px-4 py-1.5 font-semibold">Código</th>
                           <th className="px-4 py-1.5 text-right font-semibold">kg</th>
+                          <th className="px-2 py-1.5 text-center font-semibold">Fecha</th>
                           <th className="px-4 py-1.5 text-right font-semibold">{isEditing ? "Mover" : ""}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#f0f2ee]">
-                        {rem.map((o) => (
+                        {rem.map((o) => {
+                          const lineaOriginal = ords.find((x) => x.numeroOrden === o.numeroOrden);
+                          return (
                           <tr key={o.numeroOrden} className="hover:bg-[#f9fbf7]">
                             <td className="px-4 py-1.5 font-medium text-[#14352a]">{o.numeroOrden}</td>
                             <td className="max-w-[140px] truncate px-4 py-1.5 text-[#45505e]">{tc(o.cliente)} — {tc(o.destino)}</td>
                             <td className="px-4 py-1.5 text-right tabular-nums text-[#14352a]">{o.cantidadKg.toFixed(0)}</td>
+                            <td className="px-2 py-1.5 text-center">
+                              {puedeEditar && (
+                                <button
+                                  onClick={() => abrirFechaModal(o.numeroOrden, lineaOriginal?.fechaDespacho)}
+                                  title={lineaOriginal?.fechaDespacho ? `Fecha de despacho: ${lineaOriginal.fechaDespacho.slice(0, 10)}` : "Reescribir fecha de despacho"}
+                                  className={`inline-flex h-5 w-5 items-center justify-center rounded ${lineaOriginal?.fechaDespacho ? "text-[#2f8f4e]" : "text-[#c0c9bf]"} hover:bg-[#f0f2ee]`}
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                                </button>
+                              )}
+                            </td>
                             <td className="px-4 py-1.5">
                               {isEditing ? (
                                 <div className="flex justify-end">
@@ -464,10 +575,30 @@ export default function DiagramaPage() {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
+
+                  {puedeEditar && (
+                    <div className="flex items-center gap-2 border-t border-[#f0f2ee] px-4 py-2.5">
+                      <button
+                        onClick={() => setPlantillaModal({ vehiculo: v, ordenes: ords, tipo: "ruta" })}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#dfe4e0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#45505e] hover:bg-[#f4f6f3]"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
+                        Imprimir Ruta
+                      </button>
+                      <button
+                        onClick={() => setPlantillaModal({ vehiculo: v, ordenes: ords, tipo: "consolidado" })}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#dfe4e0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#45505e] hover:bg-[#f4f6f3]"
+                      >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-4" /><rect x="9" y="2" width="6" height="4" rx="1" /><path d="M9 12h6M9 16h6" /></svg>
+                        Imprimir Consolidado
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -498,6 +629,69 @@ export default function DiagramaPage() {
           onPasar={(placa) => { const e = editRemision; setEditRemision(null); moverRemision(e.numeroOrden, e.ords, placa); }}
           onClose={() => setEditRemision(null)}
         />
+      )}
+
+      {/* Modal: elegir plantilla (TAT / Inversiones) antes de imprimir */}
+      {plantillaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPlantillaModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-[#14352a]">
+              {plantillaModal.tipo === "ruta" ? "Imprimir remisiones de la ruta" : "Imprimir consolidado"}
+            </h3>
+            {plantillaModal.tipo === "ruta" ? (
+              <>
+                <p className="mt-1 text-sm text-[#5f7a68]">
+                  Vehículo {plantillaModal.vehiculo.placa} — cada remisión sale en su propia hoja con el encabezado (TAT o Inversiones) que le corresponda según su factura.
+                </p>
+                <button onClick={() => confirmarImpresion("TAT")} className="mt-4 w-full rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42]">
+                  Imprimir
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-sm text-[#5f7a68]">
+                  Vehículo {plantillaModal.vehiculo.placa} — elige la plantilla según el origen de la carga.
+                </p>
+                <div className="mt-4 flex flex-col gap-2">
+                  <button onClick={() => confirmarImpresion("TAT")} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-left text-sm font-medium text-[#14352a] hover:border-[#2f8f4e] hover:bg-[#f2f8ef]">
+                    TAT Agropecuaria
+                  </button>
+                  <button onClick={() => confirmarImpresion("INVERSIONES")} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-left text-sm font-medium text-[#14352a] hover:border-[#2f8f4e] hover:bg-[#f2f8ef]">
+                    Inversiones
+                  </button>
+                </div>
+              </>
+            )}
+            <button onClick={() => setPlantillaModal(null)} className="mt-4 w-full rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: reescribir fecha de despacho de una remisión */}
+      {fechaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setFechaModal(null)}>
+          <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-[#14352a]">Fecha de despacho</h3>
+            <p className="mt-1 text-sm text-[#5f7a68]">Remisión {fechaModal.numeroOrden}</p>
+            <input
+              type="date"
+              value={fechaModal.fecha}
+              onChange={(e) => setFechaModal({ ...fechaModal, fecha: e.target.value })}
+              className="mt-4 w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+            />
+            <p className="mt-1 text-xs text-[#9aa4af]">Déjalo vacío para volver a usar la fecha de la factura.</p>
+            <div className="mt-4 flex justify-end gap-3">
+              <button onClick={() => setFechaModal(null)} disabled={guardandoFecha} className="rounded-lg border border-[#dfe4e0] px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-60">
+                Cancelar
+              </button>
+              <button onClick={guardarFechaDespacho} disabled={guardandoFecha} className="rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60">
+                {guardandoFecha ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal: confirmar reenvío (réplica) a Drivin */}

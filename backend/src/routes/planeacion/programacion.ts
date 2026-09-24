@@ -139,31 +139,47 @@ router.post("/guardar", requirePermiso("programacion.editar"), async (req, res, 
     const clienteById = new Map(clientes.map((c) => [c.id, c]));
 
     const cambiosFilas: [string, string, unknown, unknown][] = [];
-    let n = 0;
+    // Solo se escribe lo que realmente cambió: con 4600+ destinos, hacer un
+    // upsert por fila SIEMPRE (aunque no haya cambiado nada) tardaba minutos
+    // y la petición se caía (parecía "error al guardar" sin más detalle).
+    const porEscribir: { clienteId: string; data: Record<string, number>; esNueva: boolean }[] = [];
     for (const fila of body.filas) {
       const cliente = clienteById.get(fila.clienteId);
       if (!cliente) continue;
-      const existing = existentes.get(fila.clienteId) ?? {};
+      const existing = existentes.get(fila.clienteId);
       const nombreCliente = cliente.cliente || cliente.nombreDireccion || "(sin nombre)";
       const ctx = `${INSTANCIA} · ${body.fecha} · ${cliente.codigoDireccion ? cliente.codigoDireccion + " " : ""}${nombreCliente}`;
       const data: Record<string, number> = {};
+      let cambio = !existing;
       for (const col of DETALLE_COLS) {
         if (editableCols.has(col)) {
           const val = Number(fila.valores[col] ?? 0);
-          const old = Number(existing[col] ?? 0);
-          if (val !== old) cambiosFilas.push([ctx, LABEL_COL[col] ?? col, old, val]);
+          const old = Number(existing?.[col] ?? 0);
+          if (val !== old) { cambiosFilas.push([ctx, LABEL_COL[col] ?? col, old, val]); cambio = true; }
           data[col] = val;
         } else {
-          data[col] = Number(existing[col] ?? 0);
+          data[col] = Number(existing?.[col] ?? 0);
         }
       }
-      await prisma.progDetalle.upsert({
-        where: { progId_clienteId: { progId: prog.id, clienteId: fila.clienteId } },
-        update: data,
-        create: { progId: prog.id, clienteId: fila.clienteId, ...data },
-      });
-      n++;
+      if (cambio) porEscribir.push({ clienteId: fila.clienteId, data, esNueva: !existing });
     }
+
+    // Máx. 25 upserts en vuelo a la vez — suficiente para no tardar minutos
+    // con guardados grandes, sin agotar el pool de conexiones a la BD.
+    const LOTE = 25;
+    for (let i = 0; i < porEscribir.length; i += LOTE) {
+      const lote = porEscribir.slice(i, i + LOTE);
+      await Promise.all(
+        lote.map((f) =>
+          prisma.progDetalle.upsert({
+            where: { progId_clienteId: { progId: prog.id, clienteId: f.clienteId } },
+            update: f.data,
+            create: { progId: prog.id, clienteId: f.clienteId, ...f.data },
+          })
+        )
+      );
+    }
+    const n = porEscribir.length;
     await prisma.programacion.update({ where: { id: prog.id }, data: { updatedAt: new Date() } });
     await registrarLote(req.user!.username, "Programación", cambiosFilas);
     await auditLog(req.user!.username, "GUARDAR", "Programación", `Día ${body.fecha} (${n} destinos)`, INSTANCIA);

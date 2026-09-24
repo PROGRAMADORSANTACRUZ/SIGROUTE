@@ -44,7 +44,7 @@ export default function PreplanificacionPage() {
     <div className="p-6">
       <PageHeader
         icon={IconMapPin}
-        title="Pre-planificación"
+        title="Preplanificación Siesa"
         subtitle="Facturas TAT del rango seleccionado, agrupadas por ciudad o barrio — para planear rutas antes de cargarlas en Ejecución."
       />
 

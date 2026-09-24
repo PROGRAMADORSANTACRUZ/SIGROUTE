@@ -53,6 +53,21 @@ export interface ComparativoFila { placa: string; planificado: number; ejecutado
 export interface ComparativoAdmin { fecha: string; filas: ComparativoFila[]; totales: { planificado: number; ejecutado: number } }
 export const getComparativoAdmin = (fecha?: string) => req<ComparativoAdmin>(`/dashboard/comparativo${fecha ? `?fecha=${fecha}` : ""}`);
 
+// Comparativo por CLIENTE: kg planificados en Programación vs kg realmente
+// ejecutados/cargados en Órdenes (Diagrama) — cruce por Cliente.id.
+export interface ComparativoClienteFila { clienteId: string; nombre: string; planificado: number; ejecutado: number; diferencia: number; pctDesviacion: number }
+export interface ComparativoClientesCategoria { clave: string; etiqueta: string; planificado: number; ejecutado: number }
+export interface ComparativoClientes {
+  fecha: string;
+  hayPlanificacion: boolean;
+  totales: { planificado: number; ejecutado: number; diferencia: number; pctCumplimiento: number; perdido: number; extra: number; sinClienteKg: number };
+  porCategoria: ComparativoClientesCategoria[];
+  filas: ComparativoClienteFila[];
+}
+export const getComparativoClientes = (fecha?: string) => req<ComparativoClientes>(`/dashboard/comparativo-clientes${fecha ? `?fecha=${fecha}` : ""}`);
+export const rellenarEjecutado = (fecha: string) =>
+  req<{ ok: boolean; fecha: string; clientesRellenados: number }>("/dashboard/rellenar-ejecutado", { method: "POST", body: JSON.stringify({ fecha }) });
+
 // ── Pre-planificación (facturas TAT agrupadas por ciudad o barrio) ────────
 export interface PreplanProducto { tipoComercial: string; kg: number; valor: number }
 export interface PreplanDocumento {

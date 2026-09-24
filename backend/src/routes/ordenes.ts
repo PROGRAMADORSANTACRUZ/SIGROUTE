@@ -12,6 +12,7 @@ import {
   matchDrivinAddress,
   type DrivinAddress,
 } from "../lib/drivinAddresses";
+import { esDespacho, fetchFacturasRango, type TatInvoiceRaw } from "../lib/siesaPedido";
 
 const router = Router();
 
@@ -1236,17 +1237,7 @@ router.post("/asignar", requireAuth, requirePermiso("distrilog.asignacion.editar
 });
 
 // POST /api/ordenes/sync-tat  -> trae las facturas TAT desde la API como órdenes
-interface TatInvoice {
-  nro_documento?: string;
-  fecha_documento?: string;
-  cliente_factura?: string;
-  razon_social_cliente?: string;
-  codigo_sucursal?: string;
-  descripcion_sucursal?: string;
-  direccion_sucursal?: string;
-  tipo_comercial?: string;
-  cantidad_inv?: number;
-  valor_subtotal?: number;
+interface TatInvoice extends TatInvoiceRaw {
   // Desglose por producto (una entrada por tipo comercial de la factura).
   productos?: {
     tipo_comercial?: string;
@@ -1361,6 +1352,124 @@ async function buscarFacturaEnSiesa(
   return { documento, filas };
 }
 
+// Cruza UNA factura (ya filtrada a solo líneas de despacho) con el maestro de
+// clientes TAT, arma sus líneas de Orden y las guarda — compartido entre el
+// escaneo de una sola factura (`resolverFacturaTat`) y la carga masiva de
+// todas las facturas de un rango (`cargarTodasFacturasTat`), para no duplicar
+// esta lógica de cruce en dos lugares.
+async function guardarFacturaTat(
+  origen: string,
+  documento: string,
+  filas: TatInvoice[],
+  opts: { fecFacFallback: string; rutaBody: string | null; placaInicial?: string | null; cufeManual?: string | null; qrTextoManual?: string | null; firmaDigitalManual?: string | null }
+) {
+  const nit = String(filas[0].cliente_factura ?? "").trim();
+  const numeroOrden = String(filas[0].nro_documento ?? documento).trim();
+
+  // Dirección/vendedor del maestro TAT por NIT (fallback si la factura no la
+  // trae). El código del Cliente unificado es "NIT-sucursal": un mismo NIT
+  // puede tener varias sucursales/direcciones; si hay más de una coincidencia,
+  // se elige la de mayor coincidencia con la dirección que trae la factura
+  // (solape de palabras); si no hay ninguna pista, se usa la primera.
+  const candidatosTat = nit
+    ? await prisma.cliente.findMany({
+        where: { tipo: "TAT", OR: [{ codigoDireccion: nit }, { codigoDireccion: { startsWith: `${nit}-` } }] },
+        select: { id: true, cliente: true, direccion: true, vendedor: true, barrio: true },
+      })
+    : [];
+  const dirInv = String(filas[0].direccion_sucursal ?? "").trim();
+  let clienteTat: { id: string; cliente: string | null; direccion: string | null; vendedor: string | null; barrio: string | null } | null = null;
+  if (candidatosTat.length === 1) {
+    clienteTat = candidatosTat[0];
+  } else if (candidatosTat.length > 1) {
+    let mejor = candidatosTat[0];
+    let mejorScore = -1;
+    for (const c of candidatosTat) {
+      const score = similitudDireccion(dirInv, c.direccion ?? "");
+      if (score > mejorScore) { mejorScore = score; mejor = c; }
+    }
+    clienteTat = mejor;
+  }
+  const dirMaestro = (clienteTat?.direccion ?? "").trim();
+
+  // Preserva el vehículo y la ruta si esta factura ya estaba cargada.
+  const previa = await prisma.orden.findFirst({
+    where: { numeroOrden, distribucion: "TAT", tatOrigen: origen },
+    select: { asignadoVehiculo: true, ruta: true },
+  });
+  // Vehículo: previo > el que trae la plantilla/captura > ninguno.
+  const vehiculo = previa?.asignadoVehiculo ?? opts.placaInicial ?? null;
+  // Ruta enviada > ruta previa (no se pierde al re-escanear sin grupo).
+  const ruta = opts.rutaBody ?? previa?.ruta ?? null;
+
+  // Siesa ahora expone cufe/qr/firma directo (confirmado en vivo 2026-09-24,
+  // vía t305_co_cfd) — manda sobre lo capturado por el escáner del celular,
+  // que queda solo como respaldo si la factura aún no tiene estos datos ahí.
+  const cufe = (String(filas[0].cufe ?? "").trim() || (opts.cufeManual ? String(opts.cufeManual).trim() : "")).slice(0, 100) || null;
+  const qrTexto = (String(filas[0].qr_code_url ?? "").trim() || (opts.qrTextoManual ? String(opts.qrTextoManual).trim() : "")).slice(0, 2000) || null;
+  const firmaDigital = (String(filas[0].firma_digital ?? "").trim() || (opts.firmaDigitalManual ? String(opts.firmaDigitalManual).trim() : "")).slice(0, 4000) || null;
+  const codigo = nit ? claveNitSucursal(nit, filas[0].codigo_sucursal) : null;
+  const dirInvOk = dirInv.length >= 2 && !NO_DIRECCION_TAT.has(dirInv.toUpperCase());
+  const direccion = dirInvOk ? dirInv : (dirMaestro && esDireccionTatValida(dirMaestro) ? dirMaestro : null);
+  const destino = codigo ?? direccion ?? nit;
+  // Nombre real del cliente en nuestra BD: manda sobre la razón social que
+  // trae la factura de Siesa (puede venir con distinta mayúscula/formato).
+  const clienteReal = clienteTat?.cliente?.trim() || null;
+
+  // Una línea por producto de la factura.
+  const lineas = filas.map((f) => ({
+    fecha: fechaFacturaADMY(f.fecha_documento, opts.fecFacFallback),
+    numeroOrden,
+    cliente: clienteReal || String(f.razon_social_cliente ?? "").trim(),
+    destino,
+    producto: limpiarProductoTat(String(f.tipo_comercial ?? "")) || "MERCANCÍA",
+    cantidadKg: Number(f.cantidad_inv) || 0,
+    nit: codigo,
+    codigo,
+    direccion,
+    clienteSistemaId: clienteTat?.id ?? null,
+    vendedor: clienteTat?.vendedor?.trim() ?? null,
+    valor: Number(f.valor_subtotal) || 0,
+    estado: "Pendiente",
+    distribucion: "TAT",
+    tatOrigen: origen,
+    asignadoVehiculo: vehiculo,
+    ruta,
+    cufe,
+    qrTexto,
+    firmaDigital,
+  }));
+
+  // Reemplaza solo ESTA factura (idempotente al re-escanear), acumula el resto.
+  // Si estaba marcada como "Reenvio" en nivel de servicio, se limpia su novedad
+  // para que el proceso arranque desde cero (como si nunca se hubiera montado).
+  await prisma.$transaction([
+    prisma.novedad.deleteMany({ where: { numeroOrden, estadoEntrega: "Reenvio" } }),
+    prisma.orden.deleteMany({ where: { numeroOrden, distribucion: "TAT", tatOrigen: origen } }),
+    prisma.orden.createMany({ data: lineas }),
+  ]);
+
+  const totalKg = Math.round(lineas.reduce((s, l) => s + l.cantidadKg, 0) * 100) / 100;
+  const totalValor = Math.round(lineas.reduce((s, l) => s + l.valor, 0));
+  return {
+    numeroOrden,
+    cliente: lineas[0].cliente,
+    nit: codigo ?? nit ?? null,
+    barrio: clienteTat?.barrio?.trim() || null,
+    destino,
+    direccion,
+    productos: lineas.map((l) => ({ producto: l.producto, kg: l.cantidadKg, valor: l.valor })),
+    totalKg,
+    totalValor,
+    origen,
+    ruta,
+    vehiculo,
+    cufe,
+    qrTexto,
+    firmaDigital,
+  };
+}
+
 // Resuelve UNA factura contra apiconsulta (Siesa), la cruza con el maestro de
 // clientes TAT y crea/reemplaza sus líneas de Orden. Usado tanto por el
 // escaneo de QR (`/factura`) como por la carga masiva de plantillas TAT
@@ -1372,6 +1481,14 @@ async function resolverFacturaTat(params: {
   fecFin?: string;
   ruta?: string | null;
   placaInicial?: string | null;
+  // CUFE + texto íntegro del QR, capturados por el escáner en el navegador
+  // (no se derivan de Siesa aquí: Siesa no los expone en esta API de consulta).
+  cufe?: string | null;
+  qrTexto?: string | null;
+  // Firma digital completa: pendiente de un endpoint de Siesa que aún no existe
+  // (verificado en vivo); se acepta el parámetro para no requerir otro cambio
+  // de firma el día que ese endpoint aparezca, pero hoy siempre llega null.
+  firmaDigital?: string | null;
 }) {
   const origen = params.origen.toUpperCase();
   const cia = TAT_ORIGENES[origen];
@@ -1413,103 +1530,28 @@ async function resolverFacturaTat(params: {
     throw new HttpError(404, `No se encontró la factura ${numFac} en ${origen} (se probó: ${candidatos.join(", ")})`);
   }
 
-  const nit = String(filas[0].cliente_factura ?? "").trim();
-  const numeroOrden = String(filas[0].nro_documento ?? documento).trim();
-
-  // Dirección/vendedor del maestro TAT por NIT (fallback si la factura no la
-  // trae). El código del Cliente unificado es "NIT-sucursal": un mismo NIT
-  // puede tener varias sucursales/direcciones; si hay más de una coincidencia,
-  // se elige la de mayor coincidencia con la dirección que trae la factura
-  // (solape de palabras); si no hay ninguna pista, se usa la primera.
-  const candidatosTat = nit
-    ? await prisma.cliente.findMany({
-        where: { tipo: "TAT", OR: [{ codigoDireccion: nit }, { codigoDireccion: { startsWith: `${nit}-` } }] },
-        select: { id: true, cliente: true, direccion: true, vendedor: true, barrio: true },
-      })
-    : [];
-  const dirInv = String(filas[0].direccion_sucursal ?? "").trim();
-  let clienteTat: { id: string; cliente: string | null; direccion: string | null; vendedor: string | null; barrio: string | null } | null = null;
-  if (candidatosTat.length === 1) {
-    clienteTat = candidatosTat[0];
-  } else if (candidatosTat.length > 1) {
-    let mejor = candidatosTat[0];
-    let mejorScore = -1;
-    for (const c of candidatosTat) {
-      const score = similitudDireccion(dirInv, c.direccion ?? "");
-      if (score > mejorScore) { mejorScore = score; mejor = c; }
-    }
-    clienteTat = mejor;
+  // Esta app se usa de noche para despacho; los pedidos de recogida en planta
+  // no salen en esa jornada, así que se descartan aquí (igual que en
+  // Preplanificación) — confirmado con SIESA/SIGCOM que `pedido_notas` trae el
+  // prefijo "TIPO_ENTREGA:DESPACHO"/"TIPO_ENTREGA:RECOGIDA".
+  const filasDespacho = filas.filter((f) => esDespacho(f.pedido_notas));
+  if (filasDespacho.length === 0) {
+    throw new HttpError(400, `La factura ${numFac} es de recogida en planta, no de despacho — no se carga en esta app`);
   }
-  const dirMaestro = (clienteTat?.direccion ?? "").trim();
+  filas = filasDespacho;
 
-  // Preserva el vehículo y la ruta si esta factura ya estaba cargada.
-  const previa = await prisma.orden.findFirst({
-    where: { numeroOrden, distribucion: "TAT", tatOrigen: origen },
-    select: { asignadoVehiculo: true, ruta: true },
+  return guardarFacturaTat(origen, documento, filas, {
+    fecFacFallback: fecFac,
+    rutaBody,
+    placaInicial: params.placaInicial,
+    cufeManual: params.cufe,
+    qrTextoManual: params.qrTexto,
+    firmaDigitalManual: params.firmaDigital,
   });
-  // Vehículo: previo > el que trae la plantilla/captura > ninguno.
-  const vehiculo = previa?.asignadoVehiculo ?? params.placaInicial ?? null;
-  // Ruta enviada > ruta previa (no se pierde al re-escanear sin grupo).
-  const ruta = rutaBody ?? previa?.ruta ?? null;
-
-  const codigo = nit ? claveNitSucursal(nit, filas[0].codigo_sucursal) : null;
-  const dirInvOk = dirInv.length >= 2 && !NO_DIRECCION_TAT.has(dirInv.toUpperCase());
-  const direccion = dirInvOk ? dirInv : (dirMaestro && esDireccionTatValida(dirMaestro) ? dirMaestro : null);
-  const destino = codigo ?? direccion ?? nit;
-  // Nombre real del cliente en nuestra BD: manda sobre la razón social que
-  // trae la factura de Siesa (puede venir con distinta mayúscula/formato).
-  const clienteReal = clienteTat?.cliente?.trim() || null;
-
-  // Una línea por producto de la factura.
-  const lineas = filas.map((f) => ({
-    fecha: fechaFacturaADMY(f.fecha_documento, fecFac),
-    numeroOrden,
-    cliente: clienteReal || String(f.razon_social_cliente ?? "").trim(),
-    destino,
-    producto: limpiarProductoTat(String(f.tipo_comercial ?? "")) || "MERCANCÍA",
-    cantidadKg: Number(f.cantidad_inv) || 0,
-    nit: codigo,
-    codigo,
-    direccion,
-    clienteSistemaId: clienteTat?.id ?? null,
-    vendedor: clienteTat?.vendedor?.trim() ?? null,
-    valor: Number(f.valor_subtotal) || 0,
-    estado: "Pendiente",
-    distribucion: "TAT",
-    tatOrigen: origen,
-    asignadoVehiculo: vehiculo,
-    ruta,
-  }));
-
-  // Reemplaza solo ESTA factura (idempotente al re-escanear), acumula el resto.
-  // Si estaba marcada como "Reenvio" en nivel de servicio, se limpia su novedad
-  // para que el proceso arranque desde cero (como si nunca se hubiera montado).
-  await prisma.$transaction([
-    prisma.novedad.deleteMany({ where: { numeroOrden, estadoEntrega: "Reenvio" } }),
-    prisma.orden.deleteMany({ where: { numeroOrden, distribucion: "TAT", tatOrigen: origen } }),
-    prisma.orden.createMany({ data: lineas }),
-  ]);
-
-  const totalKg = Math.round(lineas.reduce((s, l) => s + l.cantidadKg, 0) * 100) / 100;
-  const totalValor = Math.round(lineas.reduce((s, l) => s + l.valor, 0));
-  return {
-    numeroOrden,
-    cliente: lineas[0].cliente,
-    nit: codigo ?? nit ?? null,
-    barrio: clienteTat?.barrio?.trim() || null,
-    destino,
-    direccion,
-    productos: lineas.map((l) => ({ producto: l.producto, kg: l.cantidadKg, valor: l.valor })),
-    totalKg,
-    totalValor,
-    origen,
-    ruta,
-    vehiculo,
-  };
 }
 
 // POST /api/ordenes/factura  -> consulta UNA factura en apiconsulta (Siesa) y la
-// guarda (acumula). Reemplaza el sync masivo vía SIGCOM. body: { origen, numFac, fecFac, fecFin? }
+// guarda (acumula). Reemplaza el sync masivo vía SIGCOM. body: { origen, numFac, fecFac, fecFin?, cufe?, qrTexto? }
 router.post("/factura", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
   try {
     const resultado = await resolverFacturaTat({
@@ -1518,8 +1560,60 @@ router.post("/factura", requireAuth, requirePermiso("distrilog.ordenes.editar"),
       fecFac: String(req.body?.fecFac ?? ""),
       fecFin: req.body?.fecFin ? String(req.body.fecFin) : undefined,
       ruta: req.body?.ruta ? String(req.body.ruta) : undefined,
+      cufe: req.body?.cufe ? String(req.body.cufe) : undefined,
+      qrTexto: req.body?.qrTexto ? String(req.body.qrTexto) : undefined,
     });
     res.status(201).json(resultado);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/ordenes/factura-todas -> trae TODAS las facturas de despacho de un
+// rango de fechas (sin pistolear una por una) y las carga de un solo golpe.
+// body: { origen, fecha, fechaFin?, ruta? }
+router.post("/factura-todas", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
+  try {
+    const origen = String(req.body?.origen ?? "AGROPECUARIA").toUpperCase();
+    if (!TAT_ORIGENES[origen]) throw new HttpError(400, "Origen inválido (AGROPECUARIA o INVERSIONES)");
+    const fecha = String(req.body?.fecha ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new HttpError(400, "Fecha inválida");
+    const fechaFin = String(req.body?.fechaFin ?? fecha).trim().slice(0, 10) || fecha;
+    const rutaBody = req.body?.ruta ? String(req.body.ruta).trim().slice(0, 60) || null : null;
+
+    const todas = await fetchFacturasRango(origen, fecha, fechaFin);
+    // Solo despacho: esta app se usa de noche, las recogidas en planta no
+    // salen esa jornada (mismo criterio que el escaneo uno a uno).
+    const despacho = todas.filter((f) => esDespacho(f.pedido_notas));
+
+    const porDocumento = new Map<string, TatInvoiceRaw[]>();
+    for (const f of despacho) {
+      const doc = String(f.nro_documento ?? "").trim();
+      if (!doc) continue;
+      const arr = porDocumento.get(doc) ?? [];
+      arr.push(f);
+      porDocumento.set(doc, arr);
+    }
+
+    const cargadas: { numeroOrden: string; cliente: string; totalKg: number }[] = [];
+    const errores: { documento: string; error: string }[] = [];
+    for (const [documento, filasDoc] of porDocumento) {
+      try {
+        const r = await guardarFacturaTat(origen, documento, filasDoc as TatInvoice[], { fecFacFallback: fecha, rutaBody });
+        cargadas.push({ numeroOrden: r.numeroOrden, cliente: r.cliente, totalKg: r.totalKg });
+      } catch (err) {
+        errores.push({ documento, error: err instanceof HttpError ? err.message : "Error al procesar" });
+      }
+    }
+
+    res.status(201).json({
+      origen, fecha, fechaFin,
+      totalEncontradas: porDocumento.size,
+      totalRecogidaDescartadas: todas.length - despacho.length,
+      cargadas: cargadas.length,
+      facturas: cargadas,
+      errores,
+    });
   } catch (err) {
     next(err);
   }
@@ -1817,6 +1911,26 @@ router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.edit
       data: { ruta },
     });
     res.json({ actualizados: count, ruta });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/ordenes/fecha-despacho  -> reescribe la fecha de despacho de TODAS
+// las líneas de una remisión (mismo numeroOrden); si viene vacía la limpia y
+// vuelve a mostrarse agrupada por "fecha" (la de la factura/Excel) como antes.
+router.patch("/fecha-despacho", requireAuth, requirePermiso("distrilog.planes.editar"), async (req, res, next) => {
+  try {
+    const numeroOrden = String(req.body?.numeroOrden ?? "").trim();
+    if (!numeroOrden) throw new HttpError(400, "Falta numeroOrden");
+    const fechaRaw = req.body?.fecha;
+    const fechaDespacho = fechaRaw ? new Date(`${fechaRaw}T00:00:00`) : null;
+    if (fechaRaw && Number.isNaN(fechaDespacho?.getTime())) throw new HttpError(400, "Fecha inválida");
+    const { count } = await prisma.orden.updateMany({
+      where: { numeroOrden },
+      data: { fechaDespacho },
+    });
+    res.json({ actualizados: count, numeroOrden, fechaDespacho });
   } catch (err) {
     next(err);
   }

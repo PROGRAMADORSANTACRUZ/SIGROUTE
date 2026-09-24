@@ -21,6 +21,7 @@ export default function VehiculosPage() {
   const [editando, setEditando] = useState<VehiculoExterno | null>(null);
   const [valorReal, setValorReal] = useState("");
   const [valorCubicaje, setValorCubicaje] = useState("");
+  const [valorFlete, setValorFlete] = useState("");
   const [guardando, setGuardando] = useState(false);
 
   const load = useCallback(async () => {
@@ -50,6 +51,7 @@ export default function VehiculosPage() {
     setEditando(v);
     setValorReal(v.capacidadReal ?? "");
     setValorCubicaje(v.cubicaje ?? "");
+    setValorFlete(v.precioFlete ?? "");
     setError(null);
   }
 
@@ -60,10 +62,12 @@ export default function VehiculosPage() {
     try {
       const real = valorReal.trim();
       const cub = valorCubicaje.trim();
+      const flete = valorFlete.trim();
       await setCapacidadReal(
         editando.placa,
         real === "" ? null : real,
-        cub === "" ? null : cub
+        cub === "" ? null : cub,
+        flete === "" ? null : flete
       );
       setEditando(null);
       await load();
@@ -171,7 +175,7 @@ export default function VehiculosPage() {
                   </div>
 
                   {/* Cuerpo con métricas */}
-                  <div className="grid grid-cols-3 divide-x divide-[#f0f2ee] border-b border-[#f0f2ee]">
+                  <div className="grid grid-cols-2 divide-x divide-[#f0f2ee] border-b border-[#f0f2ee]">
                     <div className="flex flex-col gap-0.5 px-4 py-3">
                       <span className="text-[11px] font-medium uppercase tracking-wide text-[#9aa4af]">
                         Cap. tarjeta
@@ -197,6 +201,14 @@ export default function VehiculosPage() {
                       <span className={`text-base font-bold ${v.cubicaje ? "text-[#1a5fb4]" : "text-[#c0c9bf]"}`}>
                         {v.cubicaje ? `${v.cubicaje}` : "—"}
                         {v.cubicaje && <span className="text-xs font-medium text-[#7a8794]"> m³</span>}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-0.5 px-4 py-3">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-[#9aa4af]">
+                        Precio flete
+                      </span>
+                      <span className={`text-base font-bold ${v.precioFlete ? "text-[#a86a12]" : "text-[#c0c9bf]"}`}>
+                        {v.precioFlete ? `$${Number(v.precioFlete).toLocaleString("es-CO")}` : "—"}
                       </span>
                     </div>
                   </div>
@@ -287,6 +299,24 @@ export default function VehiculosPage() {
                 />
                 <p className="text-xs text-[#7a8794]">
                   La capacidad real y el cubicaje son los únicos campos editables.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-[#14352a]">
+                  Precio del flete ($)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={valorFlete}
+                  onChange={(e) => setValorFlete(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && guardarCapacidadReal()}
+                  placeholder="Valor pagado por el viaje/carro"
+                  className="w-full rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none transition placeholder:text-[#a6b0a9] focus:border-[#2f8f4e] focus:ring-2 focus:ring-[#2f8f4e]/20"
+                />
+                <p className="text-xs text-[#7a8794]">
+                  Se usa en Diagrama para calcular cuánto vale cada kg transportado en sus rutas.
                 </p>
               </div>
             </div>

@@ -145,7 +145,7 @@ const navGroups: NavGroup[] = [
     label: "Planeación",
     items: [
       { href: "/dashboard?panel=planeacion", label: "Dashboard", icon: dashboardIcon },
-      { href: "/planeacion/preplanificacion", label: "Pre-planificación", icon: mapPinIcon },
+      { href: "/planeacion/preplanificacion", label: "Preplanificación Siesa", icon: mapPinIcon },
       { href: "/planeacion/programacion", label: "Planificación", icon: diagramaIcon },
       { href: "/planeacion/asignacion", label: "Preasignación", icon: rutaIcon },
       { href: "/planeacion/areas", label: "Áreas para Cargar", icon: checkIcon },
@@ -161,6 +161,7 @@ const navGroups: NavGroup[] = [
       { href: "/ordenes", label: "Cargar Órdenes", icon: boxIcon },
       { href: "/asignacion-vehiculos", label: "Asignación de órdenes", icon: truckIcon },
       { href: "/planes", label: "Diagrama", icon: diagramaIcon },
+      { href: "/clientes-rutas", label: "Clientes por Ruta", icon: rutaIcon },
       { href: "/planificacion-dl", label: "Planificación D.L.", icon: checkIcon },
       { href: "/historicos", label: "Históricos", icon: historyIcon },
       {

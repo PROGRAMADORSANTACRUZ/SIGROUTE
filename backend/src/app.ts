@@ -23,7 +23,10 @@ export function createApp() {
       credentials: true,
     })
   );
-  app.use(express.json());
+  // Límite por defecto de express.json() es 100kb — Planificación manda el
+  // grid COMPLETO de Clientes (4600+) en cada Guardar, que pesa varios MB;
+  // sin este límite mayor esas peticiones fallaban silenciosamente (413).
+  app.use(express.json({ limit: "20mb" }));
   app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 
   // Sesión por cookie firmada (igual que SessionMiddleware de Starlette en
