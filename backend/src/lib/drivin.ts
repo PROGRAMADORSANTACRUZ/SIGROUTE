@@ -21,7 +21,7 @@ export interface DrivinPedidoInput {
   numeroPedido: string;
   kilos: number;
   fecha: string; // yyyy-mm-dd
-  schemaName: string;
+  schemaCode: string;
 }
 
 function habilitado(): boolean {
@@ -69,19 +69,24 @@ export async function sincronizarClienteDrivin(c: DrivinClienteInput): Promise<{
   });
 }
 
-// Crea el pedido como una orden real en Drivin (1 cliente, 1 orden, 1 tramo).
-// schemaName = esquema real de Drivin (uno de los 14 de PDV) elegido por PDV
-// o manualmente; ver listarEsquemasDrivin().
+// Crea el pedido como una orden suelta en el Gestor de Órdenes de Drivin
+// (un "mandado"), NO como un escenario/Plan con tramos optimizados — Drivin
+// confirmó (24/09/2026) que Run Errands debía usar POST /v2/orders?schema_code=
+// en vez de /v2/multipleleg, que crea un escenario (Plan) con pipeline de
+// optimización de rutas — eso es lo que "se estaba subiendo mal como planes".
+// schemaCode = código (no el nombre) del esquema real de Drivin, ver
+// listarEsquemasDrivin().
 export async function crearPedidoDrivin(p: DrivinPedidoInput): Promise<{ ok: boolean; mensaje?: string }> {
-  return llamarDrivin("/v2/multipleleg", {
+  return llamarDrivin(`/v2/orders?schema_code=${encodeURIComponent(p.schemaCode)}`, {
     clients: [{
       code: p.clienteCodigo,
       orders: [{
         code: p.numeroPedido,
+        category: "Delivery",
         units_1: p.kilos,
         delivery_date: p.fecha,
+        deploy_date: p.fecha,
         items: [{ code: "RUN-ERRANDS", description: "Run Errands", units: 1, units_1: p.kilos }],
-        legs: [{ schema_name: p.schemaName, address_code: p.clienteCodigo, departure_date: p.fecha, service_time: 10 }],
       }],
     }],
   });

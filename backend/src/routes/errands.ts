@@ -494,6 +494,9 @@ async function enviarPedidoADrivin(
       include: { cliente: true, puntoVenta: true, domiciliario: true },
     });
   }
+  // El pedido/mandado se crea vía schema_code (no schema_name) — se resuelve
+  // aquí para no cambiar la firma de esta función en sus 3 puntos de llamada.
+  const schemaCode = (await listarEsquemasDrivin()).find((e) => e.name === schemaName)?.code ?? schemaName;
   await sincronizarClienteDrivin({
     codigo: pedido.cliente.codigo, nombre: pedido.cliente.nombre, direccion: pedido.cliente.direccion,
     barrio: pedido.cliente.barrio, ciudad: pedido.cliente.ciudad, region: pedido.cliente.region,
@@ -504,7 +507,7 @@ async function enviarPedidoADrivin(
     numeroPedido: pedido.numeroPedido,
     kilos: pedido.kilos,
     fecha: pedido.fecha.toISOString().slice(0, 10),
-    schemaName,
+    schemaCode,
   });
   return prisma.errandsPedido.update({
     where: { id: pedido.id },
