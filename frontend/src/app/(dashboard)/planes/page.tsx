@@ -472,6 +472,11 @@ export default function DiagramaPage() {
               const tieneRutaReal = ords.some((o) => o.ruta?.trim());
               const colorRuta = coloresRuta[rutaNombre];
               const precioFlete = v.precioFlete ? Number(v.precioFlete) : null;
+              // Ideal = si el vehículo saliera 100% lleno (precio flete / su
+              // capacidad); Real = con lo que en verdad se cargó hoy — el
+              // real siempre es >= el ideal (nunca sale más barato que lleno).
+              const capParaFlete = capacidadEfectiva(v);
+              const fleteIdealPorKg = precioFlete && capParaFlete ? precioFlete / capParaFlete : null;
               const costoPorKg = precioFlete && totalKg > 0 ? precioFlete / totalKg : null;
               return (
                 <div key={v.id} className={`flex flex-col overflow-hidden rounded-2xl border shadow-sm transition-shadow hover:shadow-md ${isChecked ? "border-[#2f8f4e] ring-1 ring-[#2f8f4e]/30" : "border-[#e1e9dd]"}`}
@@ -521,8 +526,12 @@ export default function DiagramaPage() {
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e1e9dd]">
                       <div className={`h-1.5 rounded-full transition-all ${pct > 95 ? "bg-[#b3261e]" : pct > 70 ? "bg-[#b5941e]" : "bg-[#2f8f4e]"}`} style={{ width: `${pct}%` }} />
                     </div>
-                    {costoPorKg != null && (
-                      <p className="mt-1 text-xs text-[#a86a12]">Flete ${fmtKg(precioFlete!)} · ${costoPorKg.toFixed(0)}/kg</p>
+                    {(costoPorKg != null || fleteIdealPorKg != null) && (
+                      <p className="mt-1 text-xs text-[#a86a12]">
+                        Flete ${fmtKg(precioFlete!)}
+                        {fleteIdealPorKg != null && ` · Ideal (100%) $${fleteIdealPorKg.toFixed(0)}/kg`}
+                        {costoPorKg != null && ` · Real $${costoPorKg.toFixed(0)}/kg`}
+                      </p>
                     )}
                   </div>
 

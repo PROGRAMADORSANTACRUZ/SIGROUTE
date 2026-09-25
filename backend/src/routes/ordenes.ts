@@ -13,7 +13,7 @@ import {
   type DrivinAddress,
 } from "../lib/drivinAddresses";
 import { esDespacho, fetchFacturasRango, type TatInvoiceRaw } from "../lib/siesaPedido";
-import { calcularFlete } from "../lib/fletes";
+import { calcularFlete, capacidadEfectiva } from "../lib/fletes";
 
 const router = Router();
 
@@ -1931,7 +1931,7 @@ router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.edit
     const placa = req.body?.placa ? String(req.body.placa).trim().toUpperCase() : null;
     if (placa && ruta) {
       const vehiculo = await prisma.vehiculo.findUnique({ where: { placa }, select: { capacidad: true, capacidadReal: true } });
-      const peso = Number(vehiculo?.capacidadReal || vehiculo?.capacidad || 0);
+      const peso = capacidadEfectiva(vehiculo);
       const flete = calcularFlete(ruta, peso);
       if (flete != null) {
         precioFlete = String(flete);

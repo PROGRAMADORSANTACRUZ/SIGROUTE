@@ -59,3 +59,15 @@ export function calcularFlete(ruta: string, pesoKg: number): number | null {
   }
   return mejor.precio;
 }
+
+// Capacidad efectiva de un vehículo (real si está ingresada, si no la de
+// tarjeta) — un "0" literal NO cuenta como capacidad válida (dato mal
+// cargado), se trata igual que vacío/null. Misma regla que
+// frontend/src/lib/utils.ts::capacidadEfectiva, para todos los cálculos de
+// flete/capacidad del lado del servidor.
+export function capacidadEfectiva(v: { capacidadReal?: string | null; capacidad?: string | null } | null | undefined): number {
+  const real = Number(v?.capacidadReal);
+  if (real > 0) return real;
+  const tarjeta = Number(v?.capacidad);
+  return tarjeta > 0 ? tarjeta : 0;
+}

@@ -987,6 +987,12 @@ export default function AsignacionVehiculosPage() {
                       const pctConSel = cap ? (kgConSel / cap) * 100 : 0;
                       const wActual = cap ? Math.min(100, (kgUsado / cap) * 100) : 0;
                       const wSel = cap ? Math.min(100 - wActual, (kgSeleccionado / cap) * 100) : 0;
+                      // Flete ideal (vehículo 100% lleno) vs real (con lo que
+                      // llevaría si se confirma esta asignación) — el real
+                      // nunca es más barato que el ideal.
+                      const precioFlete = v.precioFlete ? Number(v.precioFlete) : null;
+                      const fleteIdealPorKg = precioFlete && cap ? precioFlete / cap : null;
+                      const fleteRealPorKg = precioFlete && kgConSel > 0 ? precioFlete / kgConSel : null;
                       return (
                         <tr
                           key={v.id}
@@ -1048,6 +1054,12 @@ export default function AsignacionVehiculosPage() {
                                 {kgConSel.toLocaleString("es-CO", { maximumFractionDigits: 0 })} / {cap != null ? cap.toLocaleString("es-CO", { maximumFractionDigits: 0 }) : " "} kg
                                 {!cabe && <span className="ml-1 font-medium text-[#b3261e]">· No cabe</span>}
                               </span>
+                              {(fleteIdealPorKg != null || fleteRealPorKg != null) && (
+                                <span className="text-[11px] text-[#a86a12]">
+                                  Flete{fleteIdealPorKg != null && ` · Ideal (100%) $${fleteIdealPorKg.toFixed(0)}/kg`}
+                                  {fleteRealPorKg != null && ` · Real $${fleteRealPorKg.toFixed(0)}/kg`}
+                                </span>
+                              )}
                             </div>
                           </td>
                         </tr>
