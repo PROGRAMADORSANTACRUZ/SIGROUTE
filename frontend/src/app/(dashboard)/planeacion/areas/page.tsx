@@ -13,10 +13,12 @@ import { usePermiso } from "@/lib/permisos";
 
 type Estado = "PENDIENTE" | "PROCESO" | "CARGADA";
 const ESTADOS: Estado[] = ["PENDIENTE", "PROCESO", "CARGADA"];
-const ESTADO_COLOR: Record<Estado, string> = {
-  PENDIENTE: "bg-[#f0f2ee] text-[#5f7a68] border-[#dfe4e0]",
-  PROCESO: "bg-[#fdf6e9] text-[#a86a12] border-[#f3d19b]",
-  CARGADA: "bg-[#e8f3e2] text-[#2f8f4e] border-[#cfe4d6]",
+// Semáforo: verde = esperando (aún no se empieza a cargar), ámbar = en
+// proceso, rojo = ya cerrada/completa (cargue terminado para esa área).
+const ESTADO_SEMAFORO: Record<Estado, string> = {
+  PENDIENTE: "bg-[#2f8f4e]",
+  PROCESO: "bg-[#d9a441]",
+  CARGADA: "bg-[#b3261e]",
 };
 
 interface RutaAreaCarga {
@@ -103,8 +105,13 @@ export default function AreasParaCargarPage() {
         </div>
       ) : (
         <>
-          <div className="mb-3 flex items-center gap-2 text-sm text-[#45505e]">
+          <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-[#45505e]">
             <span className="rounded-full bg-[#f7faf5] px-3 py-1 font-medium text-[#2f8f4e]">{rutasCompletas} de {totalRutas} rutas completamente cargadas</span>
+            <span className="flex items-center gap-3 text-xs text-[#7a8794]">
+              <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#2f8f4e]" /> Esperando</span>
+              <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#d9a441]" /> En proceso</span>
+              <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-[#b3261e]" /> Cargada</span>
+            </span>
           </div>
           <div className="overflow-x-auto rounded-2xl border border-[#e1e9dd] bg-white shadow-sm">
             <table className="w-full text-sm">
@@ -133,15 +140,19 @@ export default function AreasParaCargarPage() {
                       return (
                         <td key={c} className="px-3 py-2 text-center">
                           {puedeConfirmar ? (
-                            <select
-                              value={estado}
-                              onChange={(e) => cambiarEstado(r.id, c, e.target.value as Estado)}
-                              className={`rounded-full border px-2 py-1 text-xs font-medium outline-none ${ESTADO_COLOR[estado]}`}
-                            >
-                              {ESTADOS.map((e) => <option key={e} value={e}>{e}</option>)}
-                            </select>
+                            <div className="relative inline-flex h-5 w-5 items-center justify-center" title={estado}>
+                              <span className={`h-3.5 w-3.5 rounded-full ${ESTADO_SEMAFORO[estado]}`} />
+                              <select
+                                value={estado}
+                                onChange={(e) => cambiarEstado(r.id, c, e.target.value as Estado)}
+                                aria-label={`Estado de ${c} en ruta #${r.numeroRuta}`}
+                                className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+                              >
+                                {ESTADOS.map((e) => <option key={e} value={e}>{e}</option>)}
+                              </select>
+                            </div>
                           ) : (
-                            <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${ESTADO_COLOR[estado]}`}>{estado}</span>
+                            <span className={`inline-block h-3.5 w-3.5 rounded-full ${ESTADO_SEMAFORO[estado]}`} title={estado} />
                           )}
                         </td>
                       );

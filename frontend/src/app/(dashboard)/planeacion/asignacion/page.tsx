@@ -228,9 +228,9 @@ export default function AsignacionPage() {
                       <p className="truncate text-xs text-[#a7c4b5]">{r.conductor ?? "Sin conductor"}{r.horaCargue ? ` · ${r.horaCargue}` : ""}</p>
                     </div>
                     {realPorKg != null && (
-                      <div className="flex shrink-0 flex-col items-end">
-                        <span className="text-sm font-bold leading-tight text-[#ffd166]">${realPorKg.toFixed(0)}/kg</span>
-                        {idealPorKg != null && <span className="text-[10px] leading-tight text-[#a7c4b5]">ideal ${idealPorKg.toFixed(0)}/kg</span>}
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span className="inline-flex items-center rounded-full bg-[#ffd166]/15 px-2 py-0.5 text-xs font-bold text-[#ffd166]">${realPorKg.toFixed(0)}/kg</span>
+                        {idealPorKg != null && <span className="inline-flex items-center rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-[#a7c4b5]">ideal ${idealPorKg.toFixed(0)}/kg</span>}
                       </div>
                     )}
                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${r.cerrada ? "bg-[#3a4a3f] text-[#c0cabf]" : "bg-[#e8f3e2] text-[#2f8f4e]"}`}>
