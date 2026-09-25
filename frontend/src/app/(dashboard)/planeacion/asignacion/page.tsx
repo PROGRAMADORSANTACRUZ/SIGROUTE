@@ -15,6 +15,7 @@ import { IconLock, IconLockOpen, IconPencil } from "@/components/icons";
 interface RutaRow {
   id: number; numeroRuta: number; horaCargue: string | null; vehiculo: string | null; conductor: string | null;
   nDestinos: number; nAux: number; kls: number; canastillas: number; cerrada: boolean; cerradaPor: string | null;
+  precioFlete: number | null; capacidadVehiculo: number | null;
 }
 interface MaestroVehiculo { id: number; placa: string; capacidadKg: number | null; disponibilidad: string | null; kgOtrasRutas: number }
 interface Maestros {
@@ -207,7 +208,10 @@ export default function AsignacionPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {rutas.map((r) => (
+              {rutas.map((r) => {
+                const idealPorKg = r.precioFlete && r.capacidadVehiculo ? r.precioFlete / r.capacidadVehiculo : null;
+                const realPorKg = r.precioFlete && r.kls > 0 ? r.precioFlete / r.kls : null;
+                return (
                 <div key={r.id} className="flex flex-col overflow-hidden rounded-2xl border border-[#e1e9dd] bg-white shadow-sm transition-shadow hover:shadow-md">
                   <div className="flex items-center gap-3 bg-[#14352a] px-4 py-3">
                     <div className="flex flex-col items-center justify-center rounded-lg border-2 border-[#3a5a4a] bg-[#1c4433] px-3 py-1.5">
@@ -218,6 +222,12 @@ export default function AsignacionPage() {
                       <p className="truncate text-sm font-semibold text-white">{r.vehiculo ?? "Sin vehículo"}</p>
                       <p className="truncate text-xs text-[#a7c4b5]">{r.conductor ?? "Sin conductor"}{r.horaCargue ? ` · ${r.horaCargue}` : ""}</p>
                     </div>
+                    {realPorKg != null && (
+                      <div className="flex shrink-0 flex-col items-end">
+                        <span className="text-sm font-bold leading-tight text-[#ffd166]">${realPorKg.toFixed(0)}/kg</span>
+                        {idealPorKg != null && <span className="text-[10px] leading-tight text-[#a7c4b5]">ideal ${idealPorKg.toFixed(0)}/kg</span>}
+                      </div>
+                    )}
                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${r.cerrada ? "bg-[#3a4a3f] text-[#c0cabf]" : "bg-[#e8f3e2] text-[#2f8f4e]"}`}>
                       {r.cerrada ? IconLock : IconLockOpen} {r.cerrada ? "Cerrada" : "Abierta"}
                     </span>
@@ -280,7 +290,7 @@ export default function AsignacionPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+              );})}
             </div>
           )}
         </>

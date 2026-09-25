@@ -8,6 +8,7 @@ import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { INSTANCIA } from "../../lib/planCategorias";
 import { log as auditLog } from "../../lib/auditoria";
 import { sincronizarSiVencido } from "../../lib/syncMaestros";
+import { capacidadEfectiva } from "../../lib/fletes";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("asignacion.ver"));
@@ -50,6 +51,15 @@ router.get("/", async (req, res, next) => {
     const detalleRows = await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { not: null } } });
     const detalleByCliente = new Map(detalleRows.map((d) => [d.clienteId as string, d as unknown as Record<string, unknown>]));
 
+    // Precio de flete y capacidad efectiva: viven en el Vehiculo de Ejecución
+    // (capacidadReal/capacidad de Drivin/precioFlete), NO en PlanVehiculo (que
+    // solo tiene una capacidadKg propia de Planeación) — se cruzan por placa.
+    const placas = [...new Set(rutas.map((r) => r.vehiculo?.placa).filter((p): p is string => !!p))];
+    const vehiculosEjec = placas.length
+      ? await prisma.vehiculo.findMany({ where: { placa: { in: placas } }, select: { placa: true, capacidad: true, capacidadReal: true, precioFlete: true } })
+      : [];
+    const fletePorPlaca = new Map(vehiculosEjec.map((v) => [v.placa, { precioFlete: v.precioFlete ? Number(v.precioFlete) : null, capacidad: capacidadEfectiva(v) || null }]));
+
     const out = rutas.map((r) => {
       let kls = 0;
       let can = 0;
@@ -61,6 +71,7 @@ router.get("/", async (req, res, next) => {
           can += sumaCanDetalle(det);
         }
       }
+      const flete = r.vehiculo?.placa ? fletePorPlaca.get(r.vehiculo.placa) : null;
       return {
         id: r.id,
         numeroRuta: r.numeroRuta,
@@ -73,6 +84,8 @@ router.get("/", async (req, res, next) => {
         canastillas: can,
         cerrada: !!r.cerrada,
         cerradaPor: r.cerradaPor,
+        precioFlete: flete?.precioFlete ?? null,
+        capacidadVehiculo: flete?.capacidad ?? null,
       };
     });
 
