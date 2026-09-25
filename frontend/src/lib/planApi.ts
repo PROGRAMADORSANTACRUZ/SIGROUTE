@@ -106,6 +106,44 @@ export const guardarGrid = (fecha: string, filas: { clienteId: string; valores: 
 export const cerrarArea = (fecha: string, area: string) => req("/programacion/cerrar-area", { method: "POST", body: JSON.stringify({ fecha, area }) });
 export const reabrirArea = (fecha: string, area: string) => req("/programacion/reabrir-area", { method: "POST", body: JSON.stringify({ fecha, area }) });
 
+export interface FilaCargaExcel {
+  destino: string;
+  clienteId: string | null;
+  clienteNombre: string | null;
+  tipo: "exacto" | "singular" | "substring" | "sin_match";
+  kg: number;
+}
+export interface ResultadoCargaExcel {
+  area: string;
+  campoKls: string;
+  filas: FilaCargaExcel[];
+  sinMatch: string[];
+}
+
+// Sube el Excel real de despacho (hoja "Remisión") y devuelve el cruce con
+// el maestro de Clientes — no escribe en la BD, el frontend aplica el
+// resultado a la grilla en memoria y el usuario guarda manualmente.
+export async function cargarExcelProgramacion(area: string, file: File): Promise<ResultadoCargaExcel> {
+  const formData = new FormData();
+  formData.append("area", area);
+  formData.append("file", file);
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/planeacion/programacion/cargar-excel`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+  } catch {
+    throw new ApiError(0, "No se pudo conectar con el servidor");
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, err?.error ?? `Error ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── Asignación ───────────────────────────────────────────────────────────
 export const getAsignacion = (fecha: string) => req(`/asignacion?fecha=${fecha}`);
 export const getAsignacionMaestros = (fecha: string, excluirRutaId?: number) =>

@@ -2,6 +2,8 @@
 // legacy_fastapi/app/routers/programacion.py + repos/programacion.py.
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
+import * as XLSX from "xlsx";
 import { prismaPlan as prisma } from "../../lib/prisma";
 import { HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
@@ -228,9 +230,140 @@ router.post("/reabrir-area", requirePermiso("programacion.reabrir_area"), async 
   }
 });
 
-// ── Carga de kilos por área desde plantilla de despacho (.xlsx) ──────────────
-// Deshabilitada: la carga masiva por Excel apuntaba al maestro Destino y
-// nunca fue migrada al esquema basado en Cliente (ver planCategorias/Cliente).
-// Removida por completo — cargar la grilla a mano o vía Plantillas TAT.
+// ── Carga de kilos por área desde un Excel de despacho real (hoja "Remisión") ──
+// Reemplaza al viejo "Pegar desde Excel" (copiar/pegar celdas) por un botón
+// que sube el .xlsm/.xlsx directamente. Formato real (informe de desposte
+// Planta Santacruz): la hoja "Remisión" tiene un bloque de 7 columnas por
+// cliente ("DESPACHADO A: <nombre>" en el encabezado del bloque), con una
+// fila de productos (CODIGO/DESCRIPCION/KILOS/SOBRA/FALTA/%PARTIC) y una fila
+// final "TOTAL"/"TOTAL DESPACHADO" con el total de kg YA calculado por
+// cliente — se usa ese total directo (verificado que coincide exacto con la
+// suma manual de todas las filas de producto, y que la suma de todos los
+// clientes coincide con el "PESO EN FRIO" del lote completo).
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+function normalizarTexto(s: unknown): string {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+interface BloqueCliente { col: number; nombre: string }
+
+// Ubica la hoja "Remisión" (o "Remision", sin acento) sin depender del nombre exacto.
+function hojaRemision(wb: XLSX.WorkBook): XLSX.WorkSheet {
+  const nombre = wb.SheetNames.find((n) => normalizarTexto(n) === "remision");
+  if (!nombre) throw new HttpError(400, "El archivo no tiene una hoja \"Remisión\"");
+  return wb.Sheets[nombre];
+}
+
+// Extrae {cliente -> kg total despachado} de la hoja Remisión, buscando los
+// marcadores de texto reales ("DESPACHADO A:", "KILOS", "TOTAL") en vez de
+// posiciones fijas de fila/columna (cada informe puede variar un poco).
+function extraerTotalesRemision(sheet: XLSX.WorkSheet): { cliente: string; kg: number }[] {
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: "" });
+
+  const headerRow = rows.findIndex((r) => r.some((c) => normalizarTexto(c) === "despachado a:"));
+  if (headerRow === -1) throw new HttpError(400, "No se encontró la fila \"DESPACHADO A:\" en la hoja Remisión");
+
+  const bloques: BloqueCliente[] = [];
+  const fila = rows[headerRow];
+  for (let c = 0; c < fila.length; c++) {
+    if (normalizarTexto(fila[c]) === "despachado a:") {
+      bloques.push({ col: c, nombre: String(fila[c + 1] ?? "").trim() });
+    }
+  }
+  if (bloques.length === 0) throw new HttpError(400, "No se encontraron bloques de cliente en la hoja Remisión");
+
+  // Offset de la columna "KILOS" relativo al inicio del bloque (buscado en
+  // las 6 filas siguientes al encabezado, dentro del primer bloque).
+  let kilosOffset: number | null = null;
+  for (let r = headerRow + 1; r < Math.min(headerRow + 6, rows.length) && kilosOffset === null; r++) {
+    for (let off = 0; off <= 6; off++) {
+      if (normalizarTexto(rows[r][bloques[0].col + off]) === "kilos") { kilosOffset = off; break; }
+    }
+  }
+  if (kilosOffset === null) throw new HttpError(400, "No se encontró la columna \"KILOS\" en la hoja Remisión");
+
+  // Fila de totales: primera fila (después del encabezado) cuyo inicio dice "TOTAL".
+  const totalRow = rows.findIndex(
+    (r, i) => i > headerRow && r.some((c) => normalizarTexto(c) === "total" || normalizarTexto(c) === "total despachado")
+  );
+  if (totalRow === -1) throw new HttpError(400, "No se encontró la fila \"TOTAL\" en la hoja Remisión");
+
+  return bloques
+    .filter((b) => b.nombre)
+    .map((b) => ({ cliente: b.nombre, kg: Number(rows[totalRow][b.col + kilosOffset!]) || 0 }));
+}
+
+// Cruce por nombre contra el maestro de Clientes: exacto -> singular/plural
+// (quita 's' final de cada palabra) -> substring en ambos sentidos. NO se usa
+// distancia de edición (Levenshtein) sola: dio falsos positivos en la práctica
+// (ej. "La 22" emparejado con "Olaya") — mejor reportar sin match que inventar.
+function emparejarCliente(
+  nombreExcel: string,
+  clientes: { id: string; nombre: string }[]
+): { id: string; nombre: string; tipo: "exacto" | "singular" | "substring" } | null {
+  const key = normalizarTexto(nombreExcel);
+  const singularizar = (s: string) => normalizarTexto(s).split(" ").map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w)).join(" ");
+  const keySing = singularizar(nombreExcel);
+
+  for (const c of clientes) if (normalizarTexto(c.nombre) === key) return { ...c, tipo: "exacto" };
+  for (const c of clientes) if (singularizar(c.nombre) === keySing) return { ...c, tipo: "singular" };
+
+  let mejor: { id: string; nombre: string } | null = null;
+  let mejorLen = -1;
+  for (const c of clientes) {
+    const n = normalizarTexto(c.nombre);
+    if (n.includes(key) || key.includes(n)) {
+      const len = Math.min(n.length, key.length);
+      if (len > mejorLen) { mejor = c; mejorLen = len; }
+    }
+  }
+  return mejor ? { ...mejor, tipo: "substring" } : null;
+}
+
+// POST /api/planeacion/programacion/cargar-excel  (multipart: file + area)
+// Solo hace preview (parseo + cruce de clientes) — NO escribe en la BD. El
+// frontend aplica el resultado a la grilla en memoria (igual que el viejo
+// "Pegar desde Excel") y el usuario revisa y pulsa Guardar para persistir.
+router.post("/cargar-excel", requirePermiso("programacion.editar"), upload.single("file"), async (req, res, next) => {
+  try {
+    if (!req.file) throw new HttpError(400, "Falta el archivo");
+    const area = String(req.body?.area ?? "").trim();
+    const categoria = CATEGORIAS.find((c) => c.clave === area);
+    if (!categoria) throw new HttpError(400, "Área inválida");
+
+    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    const totales = extraerTotalesRemision(hojaRemision(wb));
+
+    const clientesDb = await prisma.cliente.findMany({
+      where: { activo: true },
+      select: { id: true, cliente: true, nombreDireccion: true },
+    });
+    const clientes = clientesDb
+      .map((c) => ({ id: c.id, nombre: (c.cliente || c.nombreDireccion || "").trim() }))
+      .filter((c) => c.nombre);
+
+    const filas: { destino: string; clienteId: string | null; clienteNombre: string | null; tipo: string; kg: number }[] = [];
+    const sinMatch: string[] = [];
+    for (const t of totales) {
+      const match = emparejarCliente(t.cliente, clientes);
+      if (match) {
+        filas.push({ destino: t.cliente, clienteId: match.id, clienteNombre: match.nombre, tipo: match.tipo, kg: t.kg });
+      } else {
+        sinMatch.push(t.cliente);
+        filas.push({ destino: t.cliente, clienteId: null, clienteNombre: null, tipo: "sin_match", kg: t.kg });
+      }
+    }
+
+    res.json({ area, campoKls: categoria.kls, filas, sinMatch });
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;
