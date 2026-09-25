@@ -1,4 +1,5 @@
 import type { VehiculoExterno } from "@/lib/api";
+import { capacidadEfectiva } from "@/lib/utils";
 
 // Modal compartido: quitar/mover una remisión (devolver o pasar a otro vehículo).
 // Selector de vehículos en cards: verde = cabe, rojo suave = sin capacidad.
@@ -30,7 +31,7 @@ export default function QuitarRemisionModal({
     .filter((v) => v.placa.toUpperCase() !== vehiculoActual.toUpperCase())
     .map((v) => {
       const kgActual = cargaPorPlaca.get(v.placa.toUpperCase()) ?? 0;
-      const capMax = parseFloat(v.capacidadReal ?? v.capacidad ?? "");
+      const capMax = capacidadEfectiva(v) ?? NaN;
       const tieneCap = Number.isFinite(capMax) && capMax > 0;
       const cabe = !tieneCap || kgActual + remisionKg <= capMax;
       const pctFinal = tieneCap ? Math.round(((kgActual + remisionKg) / capMax) * 100) : 0;

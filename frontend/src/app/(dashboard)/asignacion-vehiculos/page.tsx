@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, Fragment } from "react";
-import { tc, btn } from "@/lib/utils";
+import { tc, btn, capacidadEfectiva } from "@/lib/utils";
 import {
   ApiError,
   agregarAPlan,
@@ -332,9 +332,9 @@ export default function AsignacionVehiculosPage() {
     const seleccionadas = pendientes.filter((g) => seleccion.has(g.key));
     if (seleccionadas.length === 0) return;
 
-    // Usa la capacidad real si está definida; si no, la de Drivin.
-    const capEfectiva = vehiculo.capacidadReal ?? vehiculo.capacidad;
-    const capacidadMax = capEfectiva ? parseFloat(capEfectiva) : Infinity;
+    // Usa la capacidad real si está definida; si no, la de tarjeta (Drivin) —
+    // un "0" no cuenta como capacidad válida (dato mal cargado en Drivin).
+    const capacidadMax = capacidadEfectiva(vehiculo) ?? Infinity;
     const kgActual = asignadasPorPlaca(vehiculo.placa).reduce((s, g) => s + g.totalKg, 0);
 
     let kgAcumulado = kgActual;
@@ -975,8 +975,11 @@ export default function AsignacionVehiculosPage() {
                       const kgUsado = asignadasPorPlaca(v.placa).reduce((s, g) => s + g.totalKg, 0);
                       const capNormal = v.capacidad ? parseFloat(v.capacidad) : null;
                       const capReal = v.capacidadReal ? parseFloat(v.capacidadReal) : null;
-                      // Capacidad efectiva: la real si existe, si no la normal.
-                      const cap = capReal ?? capNormal;
+                      // Capacidad efectiva: la real si existe, si no la de tarjeta —
+                      // un "0" (dato mal cargado) NO cuenta, se trata como si no
+                      // existiera esa capacidad (antes "capReal ?? capNormal" con
+                      // capReal=0 se quedaba en 0 en vez de caer a la de tarjeta).
+                      const cap = capacidadEfectiva(v);
                       // Disponible tras cargar la selección actual (puede ser negativo).
                       const disponible = cap != null ? cap - kgUsado - kgSeleccionado : null;
                       const cabe = cap == null || disponible! >= 0;
@@ -1070,7 +1073,7 @@ export default function AsignacionVehiculosPage() {
                 <div>
                   <h3 className="text-base font-semibold text-[#14352a]">Capacidad excedida</h3>
                   <p className="text-sm text-[#5f7a68]">
-                    {vehiculoSel?.placa} · Cap. {vehiculoSel?.capacidad ?? " "} kg
+                    {vehiculoSel?.placa} · Cap. {vehiculoSel ? (capacidadEfectiva(vehiculoSel) ?? " ") : " "} kg
                   </p>
                 </div>
               </div>

@@ -43,3 +43,16 @@ export function direccionValida(dir: string): boolean {
   const tieneGuion = /\d\s*-\s*\d/.test(d);
   return tieneVia && tieneNumeral && tieneGuion;
 }
+
+// Capacidad efectiva de un vehículo para TODOS los flujos de asignación de
+// órdenes (Asignación, Diagrama, Nivel de Servicio, etc.): usa la capacidad
+// REAL ingresada a mano si existe (solo la tienen unos pocos vehículos), si
+// no cae a la de tarjeta (capacity_1 de Drivin, la tienen todos). Un "0"
+// literal (dato mal cargado en Drivin) NO cuenta como capacidad válida —se
+// trata igual que vacío/null—, para no mostrar "Capacidad 0" por error.
+export function capacidadEfectiva(v: { capacidadReal?: string | null; capacidad?: string | null }): number | null {
+  const real = Number(v.capacidadReal);
+  if (real > 0) return real;
+  const tarjeta = Number(v.capacidad);
+  return tarjeta > 0 ? tarjeta : null;
+}

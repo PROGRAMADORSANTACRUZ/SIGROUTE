@@ -21,7 +21,7 @@ import {
   type PlanMeta,
   type VehiculoExterno,
 } from "@/lib/api";
-import { tc } from "@/lib/utils";
+import { tc, capacidadEfectiva } from "@/lib/utils";
 import { SkeletonVehicleCard } from "@/components/Loading";
 import QuitarRemisionModal from "@/components/QuitarRemisionModal";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
@@ -267,7 +267,7 @@ export default function DiagramaPage() {
       resumen.push([
         g.vehiculo.placa, g.vehiculo.conductor ?? "", g.vehiculo.flotas ?? "", ruta,
         consolidarRemisiones(g.ordenes).length, Math.round(g.totalKg),
-        g.vehiculo.capacidad ?? "", flete ?? "", flete && g.totalKg ? Number((flete / g.totalKg).toFixed(0)) : "",
+        capacidadEfectiva(g.vehiculo) ?? "", flete ?? "", flete && g.totalKg ? Number((flete / g.totalKg).toFixed(0)) : "",
       ]);
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), "Resumen");
@@ -463,7 +463,7 @@ export default function DiagramaPage() {
         <div className="nice-scroll min-h-0 flex-1 overflow-auto">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filtrados.map(({ vehiculo: v, ordenes: ords, totalKg }) => {
-              const pct = v.capacidad ? Math.min(100, (totalKg / Number(v.capacidad)) * 100) : 0;
+              const pct = capacidadEfectiva(v) ? Math.min(100, (totalKg / capacidadEfectiva(v)!) * 100) : 0;
               const isChecked = checked.has(v.placa.toUpperCase());
               const rem = consolidarRemisiones(ords);
               const remEnviadas = rem.filter((r) => r.enviado).length;
@@ -489,7 +489,7 @@ export default function DiagramaPage() {
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-sm font-semibold text-white">{v.conductor || "Sin conductor"}</p>
                       <p className="text-xs text-[#a8c9b0]">{v.flotas || v.empleadores || "—"}</p>
-                      <p className="text-xs text-[#a8c9b0]">Cap. {v.capacidad ?? "—"} kg</p>
+                      <p className="text-xs text-[#a8c9b0]">Cap. {capacidadEfectiva(v) ?? "—"} kg</p>
                       <p className="text-xs text-[#a8c9b0]">{rem.length} remisiones</p>
                     </div>
                     <button onClick={() => setEditVeh(isEditing ? null : v.id)}

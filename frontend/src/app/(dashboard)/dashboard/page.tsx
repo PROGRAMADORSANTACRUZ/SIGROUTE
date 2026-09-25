@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, getComparativoClientes, rellenarEjecutado, type ComparativoAdmin, type ComparativoClientes } from "@/lib/planApi";
 import { getErrandsDashboard, type ErrandsDashboard } from "@/lib/errandsApi";
+import { capacidadEfectiva } from "@/lib/utils";
 import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
 import { IconRuta } from "@/components/icons";
@@ -383,7 +384,7 @@ function DashboardPageInner() {
     // Capacidad por placa (kg) desde la flota externa.
     const capPorPlaca = new Map<string, number>();
     for (const v of vehiculos) {
-      const cap = v.capacidadReal ? parseFloat(v.capacidadReal) : v.capacidad ? parseFloat(v.capacidad) : 0;
+      const cap = capacidadEfectiva(v) ?? 0;
       if (cap > 0) capPorPlaca.set(v.placa.toUpperCase(), cap);
     }
 
@@ -407,7 +408,7 @@ function DashboardPageInner() {
     const activos   = vehiculos.filter((v) => v.estado === "Activo");
 
     // Capacidad total vs cargado
-    const capTotal  = activos.reduce((s, v) => s + (v.capacidadReal ? parseFloat(v.capacidadReal) : v.capacidad ? parseFloat(v.capacidad) : 0), 0);
+    const capTotal  = activos.reduce((s, v) => s + (capacidadEfectiva(v) ?? 0), 0);
     // Ocupación de flota hoy: kg cargados vs capacidad de los vehículos con planilla.
     const capEnRuta = Array.from(porPlaca.keys()).reduce((s, placa) => s + (capPorPlaca.get(placa.toUpperCase()) ?? 0), 0);
     const pctOcupacion = capEnRuta > 0 ? Math.round((kilosHoy / capEnRuta) * 100) : 0;
