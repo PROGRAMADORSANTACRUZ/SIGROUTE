@@ -4,8 +4,16 @@ import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { env } from "../config/env";
+import { RUTAS_FLETE } from "../lib/fletes";
 
 const router = Router();
+
+// GET /api/vehiculos/rutas-flete -> lista fija de rutas con tarifa conocida,
+// para el selector de "Nombre de ruta" en Asignación de órdenes.
+router.get("/rutas-flete", requireAuth, async (_req, res) => {
+  res.json(RUTAS_FLETE);
+});
+
 
 const vehiculoSchema = z.object({
   placa: z

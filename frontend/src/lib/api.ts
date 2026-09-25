@@ -409,12 +409,11 @@ export interface FacturasTodasResult {
 export function cargarTodasFacturasTat(
   origen: "AGROPECUARIA" | "INVERSIONES",
   fecha: string,
-  fechaFin?: string,
-  ruta?: string
+  fechaFin?: string
 ): Promise<FacturasTodasResult> {
   return request<FacturasTodasResult>("/api/ordenes/factura-todas", {
     method: "POST",
-    body: JSON.stringify({ origen, fecha, fechaFin, ruta }),
+    body: JSON.stringify({ origen, fecha, fechaFin }),
   });
 }
 
@@ -537,14 +536,22 @@ export function eliminarOrdenesPorIds(
 }
 
 // Asigna (o limpia con ruta vacía) la ruta/grupo a un conjunto de órdenes por ids.
+// Si se pasa placa, el backend también calcula y guarda el precio de flete
+// del vehículo según la tabla de tarifas (ruta + peso que soporta).
 export function asignarRutaOrdenes(
   ids: string[],
-  ruta: string
-): Promise<{ actualizados: number; ruta: string | null }> {
-  return request<{ actualizados: number; ruta: string | null }>("/api/ordenes/asignar-ruta", {
+  ruta: string,
+  placa?: string
+): Promise<{ actualizados: number; ruta: string | null; precioFlete: string | null }> {
+  return request<{ actualizados: number; ruta: string | null; precioFlete: string | null }>("/api/ordenes/asignar-ruta", {
     method: "POST",
-    body: JSON.stringify({ ids, ruta }),
+    body: JSON.stringify({ ids, ruta, placa }),
   });
+}
+
+// Lista fija de rutas con tarifa de flete conocida (ver backend/src/lib/fletes.ts).
+export function getRutasFlete(): Promise<string[]> {
+  return request<string[]>("/api/vehiculos/rutas-flete");
 }
 
 export function asignarOrdenes(

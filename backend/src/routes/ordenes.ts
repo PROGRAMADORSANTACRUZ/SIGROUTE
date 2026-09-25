@@ -13,6 +13,7 @@ import {
   type DrivinAddress,
 } from "../lib/drivinAddresses";
 import { esDespacho, fetchFacturasRango, type TatInvoiceRaw } from "../lib/siesaPedido";
+import { calcularFlete } from "../lib/fletes";
 
 const router = Router();
 
@@ -1909,6 +1910,9 @@ router.post("/eliminar", requireAuth, requirePermiso("distrilog.ordenes.editar")
 });
 
 // POST /api/ordenes/asignar-ruta  -> asigna (o limpia con ruta vacía) la ruta/grupo a órdenes por ids
+// Si viene `placa`, además calcula y guarda el precio de flete del vehículo
+// según la tabla de tarifas (ruta + peso que soporta: capacidad real
+// ingresada si existe, si no la de tarjeta que trae Drivin).
 router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
   try {
     const ids: unknown = req.body?.ids;
@@ -1920,7 +1924,24 @@ router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.edit
       where: { id: { in: ids.map(String) } },
       data: { ruta },
     });
-    res.json({ actualizados: count, ruta });
+
+    let precioFlete: string | null = null;
+    const placa = req.body?.placa ? String(req.body.placa).trim().toUpperCase() : null;
+    if (placa && ruta) {
+      const vehiculo = await prisma.vehiculo.findUnique({ where: { placa }, select: { capacidad: true, capacidadReal: true } });
+      const peso = Number(vehiculo?.capacidadReal || vehiculo?.capacidad || 0);
+      const flete = calcularFlete(ruta, peso);
+      if (flete != null) {
+        precioFlete = String(flete);
+        await prisma.vehiculo.upsert({
+          where: { placa },
+          update: { precioFlete },
+          create: { placa, precioFlete },
+        });
+      }
+    }
+
+    res.json({ actualizados: count, ruta, precioFlete });
   } catch (err) {
     next(err);
   }

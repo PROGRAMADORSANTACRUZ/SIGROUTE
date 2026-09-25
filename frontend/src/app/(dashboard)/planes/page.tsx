@@ -469,6 +469,7 @@ export default function DiagramaPage() {
               const remEnviadas = rem.filter((r) => r.enviado).length;
               const isEditing = editVeh === v.id;
               const rutaNombre = nombreRutaGrupo(ords, v);
+              const tieneRutaReal = ords.some((o) => o.ruta?.trim());
               const colorRuta = coloresRuta[rutaNombre];
               const precioFlete = v.precioFlete ? Number(v.precioFlete) : null;
               const costoPorKg = precioFlete && totalKg > 0 ? precioFlete / totalKg : null;
@@ -514,7 +515,7 @@ export default function DiagramaPage() {
 
                   <div className="bg-[#f7faf5] px-4 py-2">
                     <div className="mb-1 flex justify-between text-xs text-[#5f7a68]">
-                      <span>{fmtKg(totalKg)} kg cargados{colorRuta ? ` · ${rutaNombre}` : ""}</span>
+                      <span>{fmtKg(totalKg)} kg cargados{tieneRutaReal ? ` · ${rutaNombre}` : ""}</span>
                       <span className={pct > 95 ? "font-semibold text-[#b3261e]" : ""}>{pct.toFixed(0)}%</span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#e1e9dd]">

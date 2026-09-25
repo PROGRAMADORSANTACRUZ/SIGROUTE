@@ -6,11 +6,13 @@ import {
   ApiError,
   agregarAPlan,
   asignarOrdenes,
+  asignarRutaOrdenes,
   crearPlan,
   getFlotas,
   getOrdenes,
   getPlanes,
   getPreasignacionHoy,
+  getRutasFlete,
   getSchemas,
   getVehiculosExternos,
   reenviarOrdenes,
@@ -162,6 +164,18 @@ export default function AsignacionVehiculosPage() {
   >([]);
   const [modalCapacidad, setModalCapacidad] = useState(false);
   const [buscarDiagrama, setBuscarDiagrama] = useState("");
+  // Modal de nombre de ruta: se pide justo después de elegir el vehículo (y
+  // antes de confirmar la asignación), porque ese nombre también se usa para
+  // calcular el precio de flete del vehículo según la tabla de tarifas.
+  const [rutaModal, setRutaModal] = useState<{
+    vehiculo: VehiculoExterno;
+    queCaben: OrdenGrupo[];
+    noQueCaben: { key: string; numeroOrden: string; kg: number }[];
+  } | null>(null);
+  const [rutasFlete, setRutasFlete] = useState<string[]>([]);
+  const [rutaSel, setRutaSel] = useState("");
+  const [buscarRutaModal, setBuscarRutaModal] = useState("");
+  const [guardandoRuta, setGuardandoRuta] = useState(false);
 
   // Estados del modal "Enviar a Drivin"
   const [planModal, setPlanModal] = useState(false);
@@ -211,6 +225,10 @@ export default function AsignacionVehiculosPage() {
       setLoading(false);
     })();
   }, [load]);
+
+  useEffect(() => {
+    getRutasFlete().then(setRutasFlete).catch(() => {});
+  }, []);
 
   const activos = vehiculos.filter((v) => v.estado === "Activo");
   // pendientes incluye Pendiente y Enviado (ambos son aún no entregados)
@@ -341,17 +359,32 @@ export default function AsignacionVehiculosPage() {
       return;
     }
 
-    setSaving(true);
+    // Pide el nombre de ruta antes de confirmar — se usa también para
+    // calcular el precio de flete del vehículo según la tabla de tarifas.
+    setRutaSel("");
+    setBuscarRutaModal("");
+    setRutaModal({ vehiculo, queCaben, noQueCaben });
+  }
+
+  async function confirmarAsignacion() {
+    if (!rutaModal) return;
+    const { vehiculo, queCaben, noQueCaben } = rutaModal;
+    const ruta = rutaSel.trim();
+    if (!ruta) return;
+    setGuardandoRuta(true);
     setError(null);
     setMessage(null);
     try {
       const ids = queCaben.flatMap((g) => g.ids);
       await asignarOrdenes(ids, vehiculo.placa);
-      const msg = queCaben.length === seleccionadas.length
-        ? `Se asignaron ${queCaben.length} órdenes a ${vehiculo.placa}.`
-        : `Se asignaron ${queCaben.length} de ${seleccionadas.length} órdenes a ${vehiculo.placa}.`;
+      await asignarRutaOrdenes(ids, ruta, vehiculo.placa);
+      const totalSeleccionadas = queCaben.length + noQueCaben.length;
+      const msg = queCaben.length === totalSeleccionadas
+        ? `Se asignaron ${queCaben.length} órdenes a ${vehiculo.placa} (ruta "${ruta}").`
+        : `Se asignaron ${queCaben.length} de ${totalSeleccionadas} órdenes a ${vehiculo.placa} (ruta "${ruta}").`;
       setMessage(msg);
       setSeleccion(new Set());
+      setRutaModal(null);
       await reloadOrdenes();
       if (noQueCaben.length > 0) {
         setRechazadasCapacidad(noQueCaben);
@@ -360,7 +393,7 @@ export default function AsignacionVehiculosPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error al asignar");
     } finally {
-      setSaving(false);
+      setGuardandoRuta(false);
     }
   }
 
@@ -1064,6 +1097,60 @@ export default function AsignacionVehiculosPage() {
                 className="rounded-lg bg-[#14352a] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1e4a38]"
               >
                 Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rutaModal && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl">
+            <div className="border-b border-[#eceef0] px-6 py-4">
+              <h3 className="text-base font-semibold text-[#14352a]">Nombre de la ruta</h3>
+              <p className="text-sm text-[#5f7a68]">
+                {rutaModal.vehiculo.placa} · {rutaModal.queCaben.length} orden(es) — el nombre elegido calcula el flete del vehículo.
+              </p>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+              <input
+                autoFocus
+                value={buscarRutaModal}
+                onChange={(e) => setBuscarRutaModal(e.target.value)}
+                placeholder="Buscar ruta…"
+                className="mb-3 w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+              />
+              <div className="nice-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-[#eceef0]">
+                {rutasFlete
+                  .filter((r) => r.toLowerCase().includes(buscarRutaModal.trim().toLowerCase()))
+                  .map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setRutaSel(r)}
+                      className={`block w-full border-b border-[#f0f2ee] px-4 py-2.5 text-left text-sm last:border-b-0 ${rutaSel === r ? "bg-[#e8f3e2] font-semibold text-[#2f8f4e]" : "text-[#14352a] hover:bg-[#f7faf5]"}`}
+                    >
+                      {tc(r)}
+                    </button>
+                  ))}
+                {rutasFlete.filter((r) => r.toLowerCase().includes(buscarRutaModal.trim().toLowerCase())).length === 0 && (
+                  <p className="px-4 py-3 text-sm text-[#7a8794]">Sin resultados.</p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[#eceef0] px-6 py-4">
+              <button
+                onClick={() => setRutaModal(null)}
+                disabled={guardandoRuta}
+                className="rounded-lg border border-[#dfe4e0] px-4 py-2 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarAsignacion}
+                disabled={!rutaSel || guardandoRuta}
+                className="rounded-lg bg-[#2f8f4e] px-4 py-2 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-60"
+              >
+                {guardandoRuta ? "Asignando…" : "Asignar"}
               </button>
             </div>
           </div>
