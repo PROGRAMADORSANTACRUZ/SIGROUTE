@@ -409,11 +409,12 @@ export interface FacturasTodasResult {
 export function cargarTodasFacturasTat(
   origen: "AGROPECUARIA" | "INVERSIONES",
   fecha: string,
-  fechaFin?: string
+  fechaFin?: string,
+  ruta?: string
 ): Promise<FacturasTodasResult> {
   return request<FacturasTodasResult>("/api/ordenes/factura-todas", {
     method: "POST",
-    body: JSON.stringify({ origen, fecha, fechaFin }),
+    body: JSON.stringify({ origen, fecha, fechaFin, ruta }),
   });
 }
 

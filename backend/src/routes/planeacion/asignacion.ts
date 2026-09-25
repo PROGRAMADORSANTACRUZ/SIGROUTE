@@ -8,7 +8,7 @@ import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { INSTANCIA } from "../../lib/planCategorias";
 import { log as auditLog } from "../../lib/auditoria";
 import { sincronizarSiVencido } from "../../lib/syncMaestros";
-import { capacidadEfectiva } from "../../lib/fletes";
+import { calcularFlete } from "../../lib/fletes";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("asignacion.ver"));
@@ -51,15 +51,6 @@ router.get("/", async (req, res, next) => {
     const detalleRows = await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { not: null } } });
     const detalleByCliente = new Map(detalleRows.map((d) => [d.clienteId as string, d as unknown as Record<string, unknown>]));
 
-    // Precio de flete y capacidad efectiva: viven en el Vehiculo de Ejecución
-    // (capacidadReal/capacidad de Drivin/precioFlete), NO en PlanVehiculo (que
-    // solo tiene una capacidadKg propia de Planeación) — se cruzan por placa.
-    const placas = [...new Set(rutas.map((r) => r.vehiculo?.placa).filter((p): p is string => !!p))];
-    const vehiculosEjec = placas.length
-      ? await prisma.vehiculo.findMany({ where: { placa: { in: placas } }, select: { placa: true, capacidad: true, capacidadReal: true, precioFlete: true } })
-      : [];
-    const fletePorPlaca = new Map(vehiculosEjec.map((v) => [v.placa, { precioFlete: v.precioFlete ? Number(v.precioFlete) : null, capacidad: capacidadEfectiva(v) || null }]));
-
     const out = rutas.map((r) => {
       let kls = 0;
       let can = 0;
@@ -71,21 +62,26 @@ router.get("/", async (req, res, next) => {
           can += sumaCanDetalle(det);
         }
       }
-      const flete = r.vehiculo?.placa ? fletePorPlaca.get(r.vehiculo.placa) : null;
+      // Flete: solo se puede calcular si esta ruta tiene un nombre con tarifa
+      // conocida (r.ruta, ver RUTAS_FLETE) Y el vehículo tiene capacidad
+      // registrada (PlanVehiculo.capacidadKg, propia de Planeación).
+      const capacidadVehiculo = r.vehiculo?.capacidadKg && r.vehiculo.capacidadKg > 0 ? r.vehiculo.capacidadKg : null;
+      const precioFlete = r.ruta && capacidadVehiculo ? calcularFlete(r.ruta, capacidadVehiculo) : null;
       return {
         id: r.id,
         numeroRuta: r.numeroRuta,
         horaCargue: r.horaCargue,
         vehiculo: r.vehiculo?.placa ?? null,
         conductor: r.conductor?.nombre ?? null,
+        ruta: r.ruta,
         nDestinos: r.destinos.length,
         nAux: r.auxiliares.length,
         kls,
         canastillas: can,
         cerrada: !!r.cerrada,
         cerradaPor: r.cerradaPor,
-        precioFlete: flete?.precioFlete ?? null,
-        capacidadVehiculo: flete?.capacidad ?? null,
+        precioFlete,
+        capacidadVehiculo,
       };
     });
 
@@ -183,6 +179,7 @@ router.get("/:id", async (req, res, next) => {
       vehiculoId: ruta.vehiculoId,
       conductorId: ruta.conductorId,
       horaCargue: ruta.horaCargue,
+      ruta: ruta.ruta,
       destinoIds: ruta.destinos.map((d) => d.clienteId).filter((x): x is string => !!x),
       auxiliarIds: ruta.auxiliares.map((a) => a.auxiliarId),
       destinosOcupadosOtras: otras.map((o) => o.clienteId).filter((x): x is string => !!x),
@@ -200,6 +197,7 @@ const createSchema = z.object({
   vehiculoId: z.number().nullable().optional(),
   conductorId: z.number().nullable().optional(),
   horaCargue: z.string().nullable().optional(),
+  ruta: z.string().nullable().optional(),
   destinoIds: z.array(z.string()).default([]),
   auxiliarIds: z.array(z.number()).default([]),
 });
@@ -227,6 +225,7 @@ router.post("/", requirePermiso("asignacion.editar"), async (req, res, next) => 
         vehiculoId: data.vehiculoId ?? null,
         conductorId: data.conductorId ?? null,
         horaCargue: data.horaCargue?.trim() || null,
+        ruta: data.ruta?.trim() || null,
         pesoTotal: peso,
         destinos: data.destinoIds.length
           ? { createMany: { data: data.destinoIds.map((clienteId, i) => ({ clienteId, orden: i + 1, kilos: klsByCliente.get(clienteId) ?? 0 })) } }
@@ -247,6 +246,7 @@ const updateSchema = z.object({
   vehiculoId: z.number().nullable().optional(),
   conductorId: z.number().nullable().optional(),
   horaCargue: z.string().nullable().optional(),
+  ruta: z.string().nullable().optional(),
   destinoIds: z.array(z.string()),
   auxiliarIds: z.array(z.number()),
 });
@@ -266,7 +266,7 @@ router.put("/:id", requirePermiso("asignacion.editar"), async (req, res, next) =
 
     await prisma.planRuta.update({
       where: { id },
-      data: { vehiculoId: data.vehiculoId ?? null, conductorId: data.conductorId ?? null, horaCargue: data.horaCargue?.trim() || null, pesoTotal: peso },
+      data: { vehiculoId: data.vehiculoId ?? null, conductorId: data.conductorId ?? null, horaCargue: data.horaCargue?.trim() || null, ruta: data.ruta?.trim() || null, pesoTotal: peso },
     });
     await prisma.planRutaDestino.deleteMany({ where: { rutaId: id } });
     if (data.destinoIds.length) {

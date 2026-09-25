@@ -154,6 +154,7 @@ export interface CrearRutaInput {
   vehiculoId?: number | null;
   conductorId?: number | null;
   horaCargue?: string | null;
+  ruta?: string | null;
   destinoIds?: string[];
   auxiliarIds?: number[];
 }

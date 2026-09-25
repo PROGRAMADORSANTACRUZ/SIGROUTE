@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, consultarFactura, type FacturaResult } from "@/lib/api";
+import { ApiError, consultarFactura, getRutasFlete, type FacturaResult } from "@/lib/api";
 import { tc } from "@/lib/utils";
 
 // Detector de códigos nativo (Chrome/Android). En iOS Safari no existe y se usa jsQR.
@@ -59,8 +59,15 @@ export default function FacturaScanModal({
   const [camOpen, setCamOpen] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
   const [ultima, setUltima] = useState<string | null>(null);
+  // Ruta prefijada (tabla de tarifas de flete) elegida antes de escanear —
+  // se guarda en cada Orden ya desde Cargar Órdenes, para no tener que
+  // volver a pedirla en Asignación si ya viene cargada.
+  const [ruta, setRuta] = useState("");
+  const [rutasFlete, setRutasFlete] = useState<string[]>([]);
   // Aviso temporal (2.6s) que se muestra dentro de la vista de la cámara.
   const [camFlash, setCamFlash] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  useEffect(() => { getRutasFlete().then(setRutasFlete).catch(() => {}); }, []);
 
   const flash = useCallback((ok: boolean, msg: string) => {
     setCamFlash({ ok, msg });
@@ -81,7 +88,7 @@ export default function FacturaScanModal({
           numFac,
           fecFac || new Date().toISOString().slice(0, 10),
           fecFin,
-          undefined,
+          ruta || undefined,
           cufe ?? undefined,
           qrTexto ?? undefined
         );
@@ -100,7 +107,7 @@ export default function FacturaScanModal({
         setTimeout(() => { procesandoRef.current = false; }, 1200);
       }
     },
-    [origen, onSaved, flash]
+    [origen, onSaved, flash, ruta]
   );
 
   // Pistola QR (teclado-wedge): captura global, sin necesidad de hacer foco.
@@ -248,6 +255,15 @@ export default function FacturaScanModal({
           </div>
 
           <div className="nice-scroll min-h-0 flex-1 overflow-auto p-4">
+            {/* Ruta prefijada: aplica a todo lo que se lea en esta sesión (pistola, cámara o manual). */}
+            <label className="mb-3 block">
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-[#7a8794]">Ruta (opcional)</span>
+              <select value={ruta} onChange={(e) => setRuta(e.target.value)} className="w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
+                <option value="">Sin definir (se pedirá al asignar vehículo)</option>
+                {rutasFlete.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+
             {/* Estado de la pistola: espera de lectura / consultando */}
             <div className="rounded-xl border border-[#2f8f4e]/30 bg-[#f7faf5] p-4 text-center">
               {buscando ? (

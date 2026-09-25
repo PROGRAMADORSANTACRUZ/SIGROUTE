@@ -7,13 +7,14 @@ import EmptyState from "@/components/EmptyState";
 import SearchInput from "@/components/SearchInput";
 import { IconRuta } from "@/components/icons";
 import { cerrarRuta, crearRuta, editarRuta, eliminarRuta, getAsignacion, getAsignacionMaestros, getRutaDetalle, reabrirRuta } from "@/lib/planApi";
-import { ApiError } from "@/lib/api";
+import { ApiError, getRutasFlete } from "@/lib/api";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { IconLock, IconLockOpen, IconPencil } from "@/components/icons";
 
 interface RutaRow {
   id: number; numeroRuta: number; horaCargue: string | null; vehiculo: string | null; conductor: string | null;
+  ruta: string | null;
   nDestinos: number; nAux: number; kls: number; canastillas: number; cerrada: boolean; cerradaPor: string | null;
   precioFlete: number | null; capacidadVehiculo: number | null;
 }
@@ -42,8 +43,9 @@ export default function AsignacionPage() {
   const [buscarDestino, setBuscarDestino] = useState("");
   const [vehiculoPicker, setVehiculoPicker] = useState(false);
   const [buscarVehiculo, setBuscarVehiculo] = useState("");
-  const [form, setForm] = useState<{ vehiculoId: string; conductorId: string; horaCargue: string; destinoIds: string[]; auxiliarIds: number[] }>({
-    vehiculoId: "", conductorId: "", horaCargue: "", destinoIds: [], auxiliarIds: [],
+  const [rutasFlete, setRutasFlete] = useState<string[]>([]);
+  const [form, setForm] = useState<{ vehiculoId: string; conductorId: string; horaCargue: string; ruta: string; destinoIds: string[]; auxiliarIds: number[] }>({
+    vehiculoId: "", conductorId: "", horaCargue: "", ruta: "", destinoIds: [], auxiliarIds: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,9 +64,10 @@ export default function AsignacionPage() {
       .finally(() => setLoading(false));
   }
   useEffect(() => { cargar(); }, [fecha]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { getRutasFlete().then(setRutasFlete).catch(() => {}); }, []);
 
   function formVacio(): typeof form {
-    return { vehiculoId: "", conductorId: "", horaCargue: "", destinoIds: [], auxiliarIds: [] };
+    return { vehiculoId: "", conductorId: "", horaCargue: "", ruta: "", destinoIds: [], auxiliarIds: [] };
   }
 
   // Abre el modal en modo "crear": todavía NO se persiste nada en el servidor,
@@ -81,7 +84,7 @@ export default function AsignacionPage() {
 
   async function abrirEdicion(id: number) {
     const [d, m] = await Promise.all([
-      getRutaDetalle(id) as Promise<{ vehiculoId: number | null; conductorId: number | null; horaCargue: string | null; destinoIds: string[]; auxiliarIds: number[]; destinosOcupadosOtras: string[] }>,
+      getRutaDetalle(id) as Promise<{ vehiculoId: number | null; conductorId: number | null; horaCargue: string | null; ruta: string | null; destinoIds: string[]; auxiliarIds: number[]; destinosOcupadosOtras: string[] }>,
       getAsignacionMaestros(fecha, id) as Promise<Maestros>,
     ]);
     setMaestros(m);
@@ -95,6 +98,7 @@ export default function AsignacionPage() {
       vehiculoId: d.vehiculoId ? String(d.vehiculoId) : "",
       conductorId: d.conductorId ? String(d.conductorId) : "",
       horaCargue: d.horaCargue ?? "",
+      ruta: d.ruta ?? "",
       destinoIds: d.destinoIds,
       auxiliarIds: d.auxiliarIds,
     });
@@ -121,6 +125,7 @@ export default function AsignacionPage() {
       vehiculoId: form.vehiculoId ? Number(form.vehiculoId) : null,
       conductorId: form.conductorId ? Number(form.conductorId) : null,
       horaCargue: form.horaCargue || null,
+      ruta: form.ruta || null,
       destinoIds: form.destinoIds,
       auxiliarIds: form.auxiliarIds,
     };
@@ -306,7 +311,7 @@ export default function AsignacionPage() {
 
             <div className="nice-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
               {error && <p className="mb-3 text-sm text-[#b3261e]">{error}</p>}
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <div className="flex flex-col gap-1 sm:col-span-1">
                   <span className="text-xs font-medium text-[#7a8794]">Vehículo</span>
                   <button
@@ -333,6 +338,13 @@ export default function AsignacionPage() {
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-medium text-[#7a8794]">Hora de cargue</span>
                   <input placeholder="Ej. 06:30" value={form.horaCargue} onChange={(e) => setForm((f) => ({ ...f, horaCargue: e.target.value }))} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-[#7a8794]">Ruta (para flete)</span>
+                  <select value={form.ruta} onChange={(e) => setForm((f) => ({ ...f, ruta: e.target.value }))} className="rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
+                    <option value="">Sin definir</option>
+                    {rutasFlete.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
                 </label>
               </div>
 

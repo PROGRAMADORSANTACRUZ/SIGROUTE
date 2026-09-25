@@ -359,6 +359,15 @@ export default function AsignacionVehiculosPage() {
       return;
     }
 
+    // Si TODAS las órdenes que caben ya traen la MISMA ruta (cargada desde
+    // Cargar Órdenes al pistolear/traer todas), se usa esa directo y no se
+    // vuelve a preguntar — solo se pide si falta o si vienen mezcladas.
+    const rutasQueCaben = new Set(queCaben.map((g) => (g.ruta ?? "").trim()).filter(Boolean));
+    if (rutasQueCaben.size === 1 && queCaben.every((g) => (g.ruta ?? "").trim())) {
+      await finalizarAsignacion(vehiculo, queCaben, noQueCaben, [...rutasQueCaben][0]);
+      return;
+    }
+
     // Pide el nombre de ruta antes de confirmar — se usa también para
     // calcular el precio de flete del vehículo según la tabla de tarifas.
     setRutaSel("");
@@ -366,11 +375,12 @@ export default function AsignacionVehiculosPage() {
     setRutaModal({ vehiculo, queCaben, noQueCaben });
   }
 
-  async function confirmarAsignacion() {
-    if (!rutaModal) return;
-    const { vehiculo, queCaben, noQueCaben } = rutaModal;
-    const ruta = rutaSel.trim();
-    if (!ruta) return;
+  async function finalizarAsignacion(
+    vehiculo: VehiculoExterno,
+    queCaben: OrdenGrupo[],
+    noQueCaben: { key: string; numeroOrden: string; kg: number }[],
+    ruta: string
+  ) {
     setGuardandoRuta(true);
     setError(null);
     setMessage(null);
@@ -395,6 +405,15 @@ export default function AsignacionVehiculosPage() {
     } finally {
       setGuardandoRuta(false);
     }
+  }
+
+
+  async function confirmarAsignacion() {
+    if (!rutaModal) return;
+    const { vehiculo, queCaben, noQueCaben } = rutaModal;
+    const ruta = rutaSel.trim();
+    if (!ruta) return;
+    await finalizarAsignacion(vehiculo, queCaben, noQueCaben, ruta);
   }
 
   async function quitar(g: OrdenGrupo) {

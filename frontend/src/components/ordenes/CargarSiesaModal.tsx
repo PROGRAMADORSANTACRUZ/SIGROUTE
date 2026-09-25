@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ApiError, cargarTodasFacturasTat, type FacturasTodasResult } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { ApiError, cargarTodasFacturasTat, getRutasFlete, type FacturasTodasResult } from "@/lib/api";
 
 // Paso previo a "Leer factura": el operador elige si va a pistolear/escanear
 // una factura a la vez, o traer TODAS las facturas de despacho del día de una
@@ -20,9 +20,13 @@ export default function CargarSiesaModal({
   const [modo, setModo] = useState<"elegir" | "todas">("elegir");
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
   const [fechaFin, setFechaFin] = useState("");
+  const [ruta, setRuta] = useState("");
+  const [rutasFlete, setRutasFlete] = useState<string[]>([]);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultado, setResultado] = useState<FacturasTodasResult | null>(null);
+
+  useEffect(() => { getRutasFlete().then(setRutasFlete).catch(() => {}); }, []);
 
   const etiqueta = origen === "INVERSIONES" ? "TAT Inversiones" : "TAT Agropecuaria";
 
@@ -30,7 +34,7 @@ export default function CargarSiesaModal({
     setCargando(true);
     setError(null);
     try {
-      const r = await cargarTodasFacturasTat(origen, fecha, fechaFin || undefined);
+      const r = await cargarTodasFacturasTat(origen, fecha, fechaFin || undefined, ruta || undefined);
       setResultado(r);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo cargar");
@@ -81,6 +85,13 @@ export default function CargarSiesaModal({
               <div>
                 <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-[#7a8794]">Fecha fin (opcional)</label>
                 <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-[#7a8794]">Ruta (opcional)</label>
+                <select value={ruta} onChange={(e) => setRuta(e.target.value)} className="w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]">
+                  <option value="">Sin definir (se pedirá al asignar vehículo)</option>
+                  {rutasFlete.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
               </div>
               {error && <p className="text-sm text-[#b3261e]">{error}</p>}
               <div className="mt-1 flex justify-end gap-2">
