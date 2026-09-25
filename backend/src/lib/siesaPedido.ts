@@ -18,6 +18,11 @@ export interface TatInvoiceRaw {
   direccion_sucursal?: string;
   cantidad_inv?: number;
   valor_subtotal?: number;
+  // Vendedor real de la factura (agregado por Siesa/SIGCOM 2026-09-24,
+  // confirmado en vivo) — antes solo se conseguía (a veces) desde el maestro
+  // TAT local por NIT, que casi nunca lo tenía poblado.
+  codigo_vendedor?: string | null;
+  nombre_vendedor?: string | null;
   npedido_sigcom?: string | null;
   num_docto_referencia_pedido?: string | null;
   pedido_notas?: string | null;

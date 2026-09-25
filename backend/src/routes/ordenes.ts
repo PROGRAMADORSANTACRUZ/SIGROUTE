@@ -1438,7 +1438,9 @@ async function guardarFacturaTat(
     codigo,
     direccion,
     clienteSistemaId: clienteTat?.id ?? null,
-    vendedor: clienteTat?.vendedor?.trim() ?? null,
+    // Vendedor real de la factura (Siesa, campo nombre_vendedor); si esa
+    // factura puntual no lo trae, cae al maestro TAT local como respaldo.
+    vendedor: String(f.nombre_vendedor ?? "").trim() || clienteTat?.vendedor?.trim() || null,
     ciudad: clienteTat?.provincia?.trim() || null,
     valor: Number(f.valor_subtotal) || 0,
     estado: "Pendiente",
