@@ -294,9 +294,11 @@ function extraerTotalesRemision(sheet: XLSX.WorkSheet): { cliente: string; kg: n
   );
   if (totalRow === -1) throw new HttpError(400, "No se encontró la fila \"TOTAL\" en la hoja Remisión");
 
+  // Redondeado a kg entero: el Excel trae varios decimales de punto flotante
+  // (arrastrados de sus propias fórmulas) que no aportan nada útil aquí.
   return bloques
     .filter((b) => b.nombre)
-    .map((b) => ({ cliente: b.nombre, kg: Number(rows[totalRow][b.col + kilosOffset!]) || 0 }));
+    .map((b) => ({ cliente: b.nombre, kg: Math.round(Number(rows[totalRow][b.col + kilosOffset!]) || 0) }));
 }
 
 // Cruce por nombre contra el maestro de Clientes: exacto -> singular/plural
