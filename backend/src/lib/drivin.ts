@@ -22,6 +22,10 @@ export interface DrivinPedidoInput {
   kilos: number;
   fecha: string; // yyyy-mm-dd
   schemaCode: string;
+  // Qué es el mandado (ej. observaciones del pedido) — sin esto Drivin no
+  // tiene forma de mostrarle al domiciliario más que la dirección; queda
+  // como "pedido" genérico en su app en vez de decir para qué es.
+  descripcion?: string | null;
 }
 
 function habilitado(): boolean {
@@ -77,16 +81,22 @@ export async function sincronizarClienteDrivin(c: DrivinClienteInput): Promise<{
 // schemaCode = código (no el nombre) del esquema real de Drivin, ver
 // listarEsquemasDrivin().
 export async function crearPedidoDrivin(p: DrivinPedidoInput): Promise<{ ok: boolean; mensaje?: string }> {
+  const descripcion = (p.descripcion ?? "").trim() || `Mandado ${p.numeroPedido}`;
   return llamarDrivin(`/v2/orders?schema_code=${encodeURIComponent(p.schemaCode)}`, {
     clients: [{
       code: p.clienteCodigo,
       orders: [{
         code: p.numeroPedido,
+        // "description" es lo que la app del domiciliario muestra como
+        // encabezado de la parada (antes solo mandábamos la dirección del
+        // cliente, que ya trae Drivin del Maestro — este campo es el que
+        // faltaba para que se vea el nombre/motivo real del mandado).
+        description: descripcion,
         category: "Delivery",
         units_1: p.kilos,
         delivery_date: p.fecha,
         deploy_date: p.fecha,
-        items: [{ code: "RUN-ERRANDS", description: "Run Errands", units: 1, units_1: p.kilos }],
+        items: [{ code: "RUN-ERRANDS", description: descripcion, units: 1, units_1: p.kilos }],
       }],
     }],
   });

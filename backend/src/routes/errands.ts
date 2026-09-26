@@ -479,7 +479,7 @@ const pedidoSchema = z.object({
 // que quede visible en la tabla en vez de perderse en silencio.
 async function enviarPedidoADrivin(
   pedido: {
-    id: number; numeroPedido: string; kilos: number; fecha: Date;
+    id: number; numeroPedido: string; kilos: number; fecha: Date; observaciones?: string | null;
     cliente: {
       codigo: string; nombre: string; direccion: string | null; barrio: string | null;
       ciudad: string | null; region: string | null; telefono: string | null; email: string | null;
@@ -508,6 +508,7 @@ async function enviarPedidoADrivin(
     kilos: pedido.kilos,
     fecha: pedido.fecha.toISOString().slice(0, 10),
     schemaCode,
+    descripcion: pedido.observaciones,
   });
   return prisma.errandsPedido.update({
     where: { id: pedido.id },

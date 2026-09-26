@@ -12,6 +12,7 @@ import {
   getOrdenes,
   getPlanes,
   getPreasignacionHoy,
+  getRutas,
   getRutasFlete,
   getSchemas,
   getVehiculosExternos,
@@ -20,6 +21,7 @@ import {
   type Plan,
   type PlanMeta,
   type PreasignacionHoy,
+  type Ruta,
   type VehiculoExterno,
 } from "@/lib/api";
 import SearchInput from "@/components/SearchInput";
@@ -132,6 +134,31 @@ function matchSub(g: OrdenGrupo, dist: "" | "TAT" | "GS", sub: string): boolean 
   return true;
 }
 
+// Normaliza texto para comparar sin importar tildes/mayúsculas (misma regla
+// que normalizarRuta() del backend, ver lib/fletes.ts).
+function normalizarTexto(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+}
+
+// El campo "ciudad" de la ruta puede traer varias ciudades del recorrido
+// unidas por guion (ej. "MALAMBO-SOLEDAD-BARRANQUILLA") — la última es el
+// destino final, que es la que importa para la tarifa de flete. Si "ciudad"
+// viene vacío, cae a la última ciudad del "recorrido".
+function ultimaCiudad(r: Ruta): string {
+  const fuente = (r.ciudad || r.recorrido || "").trim();
+  if (!fuente) return "";
+  const partes = fuente.split("-").map((p) => p.trim()).filter(Boolean);
+  return partes[partes.length - 1] ?? "";
+}
+
+// Busca la ciudad detectada dentro de la lista de rutas con tarifa de flete
+// (match exacto sin tildes/mayúsculas) — null si no hay ninguna coincidencia.
+function matchCiudadFlete(ciudad: string, rutasFlete: string[]): string | null {
+  if (!ciudad) return null;
+  const norm = normalizarTexto(ciudad);
+  return rutasFlete.find((r) => normalizarTexto(r) === norm) ?? null;
+}
+
 export default function AsignacionVehiculosPage() {
   const puedeAsignar = usePermiso("distrilog.asignacion.editar");
   const puedeNivelServicio = usePermiso("distrilog.nivel_servicio.editar");
@@ -173,6 +200,10 @@ export default function AsignacionVehiculosPage() {
     noQueCaben: { key: string; numeroOrden: string; kg: number }[];
   } | null>(null);
   const [rutasFlete, setRutasFlete] = useState<string[]>([]);
+  const [rutasMaestro, setRutasMaestro] = useState<Ruta[]>([]);
+  // Ruta operativa elegida (maestro de Configuración > Rutas) — de ahí se
+  // detecta la ciudad/destino automáticamente (última ciudad del recorrido).
+  const [rutaOperativaSel, setRutaOperativaSel] = useState<Ruta | null>(null);
   const [rutaSel, setRutaSel] = useState("");
   const [buscarRutaModal, setBuscarRutaModal] = useState("");
   const [guardandoRuta, setGuardandoRuta] = useState(false);
@@ -228,6 +259,7 @@ export default function AsignacionVehiculosPage() {
 
   useEffect(() => {
     getRutasFlete().then(setRutasFlete).catch(() => {});
+    getRutas().then(setRutasMaestro).catch(() => {});
   }, []);
 
   const activos = vehiculos.filter((v) => v.estado === "Activo");
@@ -371,6 +403,7 @@ export default function AsignacionVehiculosPage() {
     // Pide el nombre de ruta antes de confirmar — se usa también para
     // calcular el precio de flete del vehículo según la tabla de tarifas.
     setRutaSel("");
+    setRutaOperativaSel(null);
     setBuscarRutaModal("");
     setRutaModal({ vehiculo, queCaben, noQueCaben });
   }
@@ -1141,36 +1174,87 @@ export default function AsignacionVehiculosPage() {
         <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 p-4">
           <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl bg-white shadow-xl">
             <div className="border-b border-[#eceef0] px-6 py-4">
-              <h3 className="text-base font-semibold text-[#14352a]">Nombre de la ruta</h3>
+              <h3 className="text-base font-semibold text-[#14352a]">{rutaOperativaSel ? "Ciudad / destino" : "Ruta"}</h3>
               <p className="text-sm text-[#5f7a68]">
-                {rutaModal.vehiculo.placa} · {rutaModal.queCaben.length} orden(es) — el nombre elegido calcula el flete del vehículo.
+                {rutaModal.vehiculo.placa} · {rutaModal.queCaben.length} orden(es) — la ruta elegida calcula el flete del vehículo.
               </p>
             </div>
-            <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
-              <input
-                autoFocus
-                value={buscarRutaModal}
-                onChange={(e) => setBuscarRutaModal(e.target.value)}
-                placeholder="Buscar ruta…"
-                className="mb-3 w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
-              />
-              <div className="nice-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-[#eceef0]">
-                {rutasFlete
-                  .filter((r) => r.toLowerCase().includes(buscarRutaModal.trim().toLowerCase()))
-                  .map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setRutaSel(r)}
-                      className={`block w-full border-b border-[#f0f2ee] px-4 py-2.5 text-left text-sm last:border-b-0 ${rutaSel === r ? "bg-[#e8f3e2] font-semibold text-[#2f8f4e]" : "text-[#14352a] hover:bg-[#f7faf5]"}`}
-                    >
-                      {tc(r)}
-                    </button>
-                  ))}
-                {rutasFlete.filter((r) => r.toLowerCase().includes(buscarRutaModal.trim().toLowerCase())).length === 0 && (
-                  <p className="px-4 py-3 text-sm text-[#7a8794]">Sin resultados.</p>
+
+            {!rutaOperativaSel ? (
+              // Paso 1: elegir la ruta operativa real (Configuración > Rutas).
+              <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+                <input
+                  autoFocus
+                  value={buscarRutaModal}
+                  onChange={(e) => setBuscarRutaModal(e.target.value)}
+                  placeholder="Buscar ruta…"
+                  className="mb-3 w-full rounded-lg border border-[#dfe4e0] px-3 py-2 text-sm outline-none focus:border-[#2f8f4e]"
+                />
+                <div className="nice-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-[#eceef0]">
+                  {rutasMaestro
+                    .filter((r) => `${r.nombre} ${r.grupo ?? ""}`.toLowerCase().includes(buscarRutaModal.trim().toLowerCase()))
+                    .map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => {
+                          setRutaOperativaSel(r);
+                          setBuscarRutaModal("");
+                          const detectada = matchCiudadFlete(ultimaCiudad(r), rutasFlete);
+                          setRutaSel(detectada ?? "");
+                        }}
+                        className="block w-full border-b border-[#f0f2ee] px-4 py-2.5 text-left text-sm last:border-b-0 text-[#14352a] hover:bg-[#f7faf5]"
+                      >
+                        <span className="font-medium">{r.nombre}</span>
+                        {r.grupo && <span className="ml-2 text-xs text-[#7a8794]">{r.grupo}</span>}
+                      </button>
+                    ))}
+                  {rutasMaestro.filter((r) => `${r.nombre} ${r.grupo ?? ""}`.toLowerCase().includes(buscarRutaModal.trim().toLowerCase())).length === 0 && (
+                    <p className="px-4 py-3 text-sm text-[#7a8794]">Sin resultados.</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              // Paso 2: ciudad/destino detectada automáticamente (última ciudad
+              // del recorrido de la ruta elegida) — si no coincide con ninguna
+              // de la tabla de tarifas, se pide elegirla a mano.
+              <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+                <div className="mb-3 flex items-center justify-between rounded-lg bg-[#f7faf5] px-3 py-2 text-sm">
+                  <span>
+                    Ruta: <b>{rutaOperativaSel.nombre}</b>
+                  </span>
+                  <button
+                    onClick={() => { setRutaOperativaSel(null); setRutaSel(""); }}
+                    className="text-xs font-medium text-[#2f8f4e] hover:underline"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+                {rutaSel ? (
+                  <p className="rounded-lg border border-[#cfe4d6] bg-[#e8f3e2] px-3 py-2.5 text-sm text-[#2f8f4e]">
+                    Ciudad/destino detectada: <b>{tc(rutaSel)}</b>
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-2 rounded-lg border border-[#f3d19b] bg-[#fdf6e9] px-3 py-2.5 text-sm text-[#a86a12]">
+                      No se detectó una ciudad con tarifa conocida
+                      {ultimaCiudad(rutaOperativaSel) ? ` (se leyó "${ultimaCiudad(rutaOperativaSel)}")` : ""} — elígela a mano.
+                    </p>
+                    <div className="nice-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-[#eceef0]">
+                      {rutasFlete.map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => setRutaSel(r)}
+                          className="block w-full border-b border-[#f0f2ee] px-4 py-2.5 text-left text-sm last:border-b-0 text-[#14352a] hover:bg-[#f7faf5]"
+                        >
+                          {tc(r)}
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
-            </div>
+            )}
+
             <div className="flex justify-end gap-2 border-t border-[#eceef0] px-6 py-4">
               <button
                 onClick={() => setRutaModal(null)}
