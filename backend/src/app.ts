@@ -11,6 +11,17 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 export function createApp() {
   const app = express();
 
+  // El contenedor recibe el tráfico real vía Nginx -> Traefik -> Cloudflare,
+  // TODOS terminando TLS antes de llegar a Express por HTTP plano interno.
+  // Sin esto, Express (y la librería "cookies" que usa cookie-session) ve
+  // `req.protocol==="http"` SIEMPRE y con `secure:true` en la cookie de
+  // sesión lanza "Cannot send secure cookie over unencrypted connection" al
+  // final de cada response — el login respondía 200 igual (el error pasa
+  // DESPUÉS de que la ruta ya mandó su JSON) pero el Set-Cookie nunca salía,
+  // así que /api/auth/me quedaba siempre en 401 después de "loguearse bien".
+  // `X-Forwarded-Proto` ya lo manda Nginx (nginx.conf) y Traefik por defecto.
+  app.set("trust proxy", 1);
+
   app.use(helmet());
   // Comprime las respuestas JSON grandes (maestros de clientes, órdenes,
   // novedades pueden pesar varios cientos de KB / unos MB sin comprimir) —
