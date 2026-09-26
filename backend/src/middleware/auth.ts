@@ -33,16 +33,25 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   const userId = req.session?.userId;
   if (!userId) return next(new HttpError(401, "No autorizado"));
 
-  const user = await loadCurrentUser(userId);
-  if (!user) {
-    // El usuario fue desactivado o eliminado: limpia la sesión.
-    req.session = null as unknown as Request["session"];
-    return next(new HttpError(401, "Sesión inválida"));
-  }
+  try {
+    const user = await loadCurrentUser(userId);
+    if (!user) {
+      // El usuario fue desactivado o eliminado: limpia la sesión.
+      req.session = null as unknown as Request["session"];
+      return next(new HttpError(401, "Sesión inválida"));
+    }
 
-  req.sessionUser = user;
-  req.user = toAuthPayload(user);
-  next();
+    req.sessionUser = user;
+    req.user = toAuthPayload(user);
+    next();
+  } catch (err) {
+    // CRÍTICO: sin este catch, un error async acá (ej. timeout del pool de
+    // conexiones de Prisma) queda como unhandled rejection y tumba TODO el
+    // proceso (Express 4 no atrapa errores de middleware async solo) — pasa
+    // en CADA request autenticado, así que un solo hiccup de BD reiniciaba
+    // el contenedor entero. Ahora se propaga como error normal de request.
+    next(err);
+  }
 }
 
 // Exige que el usuario tenga permiso sobre un módulo. ADMIN tiene acceso total.

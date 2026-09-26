@@ -32,7 +32,32 @@ export async function authenticate(username: string, password: string): Promise<
 }
 
 export async function loadCurrentUser(userId: number): Promise<SessionUser | null> {
-  return buildSessionUser(userId);
+  return buildSessionUserCached(userId);
+}
+
+// Cache muy corta (en memoria, por proceso) de buildSessionUser: esta consulta
+// (usuario + rol + permisos + columnas) corre en CADA request autenticado, y
+// una sola carga de pantalla dispara varios requests en paralelo (visto en
+// vivo: 6 GET simultáneos al abrir el dashboard) — cada uno pedía su propia
+// conexión de Prisma para la MISMA data del MISMO usuario. Con muchos
+// usuarios conectados a la vez esto agotaba el pool de conexiones (15 por
+// defecto) y tumbaba el backend entero. TTL corto a propósito: los cambios de
+// permisos/desactivación siguen viéndose "casi al instante" (máx. unos
+// segundos de rezago), pero las ráfagas de requests paralelos del mismo
+// usuario ahora comparten UNA sola consulta en vez de una por request.
+const SESSION_CACHE_TTL_MS = 3000;
+const sessionCache = new Map<number, { expires: number; promise: Promise<SessionUser | null> }>();
+
+function buildSessionUserCached(userId: number): Promise<SessionUser | null> {
+  const now = Date.now();
+  const hit = sessionCache.get(userId);
+  if (hit && hit.expires > now) return hit.promise;
+
+  const promise = buildSessionUser(userId);
+  sessionCache.set(userId, { expires: now + SESSION_CACHE_TTL_MS, promise });
+  // Si falla, no dejar la entrada envenenada en cache para el siguiente request.
+  promise.catch(() => sessionCache.delete(userId));
+  return promise;
 }
 
 async function buildSessionUser(userId: number): Promise<SessionUser | null> {
