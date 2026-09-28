@@ -15,6 +15,9 @@ const envSchema = z.object({
     .string()
     .default("false")
     .transform((v) => v === "true"),
+  SSO_ISSUER_URL: z.string().optional(),
+  SSO_SHARED_SECRET: z.string().optional(),
+  SSO_TIMEOUT_MS: z.coerce.number().default(7000),
   DRIVIN_API_URL: z
     .string()
     .default("https://external.driv.in/api/external"),

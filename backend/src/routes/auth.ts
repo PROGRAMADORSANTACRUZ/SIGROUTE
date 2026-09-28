@@ -10,12 +10,17 @@ import { authenticate, loadCurrentUser } from "../lib/authSession";
 import { hashPassword } from "../lib/security";
 import { prismaPlan as prisma } from "../lib/prisma";
 import { versiculoDelDia } from "../lib/versiculo";
+import { env } from "../config/env";
 
 const router = Router();
 
 const loginSchema = z.object({
   username: z.string().trim().min(1, "El usuario es obligatorio"),
   password: z.string().min(1, "La contraseña es obligatoria"),
+});
+
+const ssoLoginSchema = z.object({
+  ticket: z.string().trim().min(1, "El ticket SSO es obligatorio"),
 });
 
 // GET /api/auth/versiculo — público (se muestra en el login, antes de autenticar).
@@ -33,6 +38,85 @@ router.post("/login", async (req, res, next) => {
     if (!user) throw new HttpError(401, "Usuario o contraseña incorrectos");
 
     req.session = { userId: user.id };
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/sso-login
+router.post("/sso-login", async (req, res, next) => {
+  try {
+    const parsed = ssoLoginSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0].message);
+
+    const issuer = (env.SSO_ISSUER_URL || "").trim().replace(/\/+$/, "");
+    const secret = (env.SSO_SHARED_SECRET || "").trim();
+    if (!issuer || !secret) {
+      throw new HttpError(503, "SSO no está configurado en este servicio");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.SSO_TIMEOUT_MS);
+
+    let redeemRes: Response;
+    try {
+      redeemRes = await fetch(`${issuer}/api/sso/redeem`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SSO-Secret": secret,
+        },
+        body: JSON.stringify({ ticket: parsed.data.ticket }),
+        signal: controller.signal,
+      });
+    } catch {
+      throw new HttpError(502, "No fue posible validar el ticket SSO");
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!redeemRes.ok) {
+      if (redeemRes.status === 404 || redeemRes.status === 410) {
+        throw new HttpError(401, "El ticket SSO es inválido o expiró");
+      }
+      throw new HttpError(502, "No fue posible validar el ticket SSO");
+    }
+
+    const payload = (await redeemRes.json()) as {
+      cedula?: string | null;
+      email?: string | null;
+    };
+
+    const cedula = String(payload.cedula || "").trim();
+    const email = String(payload.email || "").trim();
+    const orFilters: Array<{ username?: string; email?: string }> = [];
+    if (cedula) orFilters.push({ username: cedula });
+    if (email) orFilters.push({ email });
+    if (orFilters.length === 0) {
+      throw new HttpError(403, "Tu identidad no está habilitada en SIGROUTE");
+    }
+
+    const localUser = await prisma.usuario.findFirst({
+      where: {
+        activo: true,
+        OR: orFilters,
+      },
+    });
+
+    if (!localUser) {
+      throw new HttpError(403, "No tienes acceso a SIGROUTE");
+    }
+
+    await prisma.usuario.update({
+      where: { id: localUser.id },
+      data: { ultimoLogin: new Date() },
+    });
+
+    req.session = { userId: localUser.id };
+    const user = await loadCurrentUser(localUser.id);
+    if (!user) throw new HttpError(403, "No tienes acceso a SIGROUTE");
+
     res.json({ user });
   } catch (err) {
     next(err);

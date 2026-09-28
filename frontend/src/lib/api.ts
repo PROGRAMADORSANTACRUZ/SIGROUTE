@@ -95,6 +95,15 @@ export async function login(username: string, password: string): Promise<LoginRe
   return data;
 }
 
+export async function loginWithSsoTicket(ticket: string): Promise<LoginResponse> {
+  const data = await request<LoginResponse>("/api/auth/sso-login", {
+    method: "POST",
+    body: JSON.stringify({ ticket }),
+  });
+  saveSession(data.user);
+  return data;
+}
+
 export async function logout(): Promise<void> {
   try {
     await request("/api/auth/logout", { method: "POST" });
