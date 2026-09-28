@@ -39,45 +39,64 @@ function fmtArea(km2: number): string {
   return km2 < 1 ? `≈ ${Math.round(km2 * 1_000_000).toLocaleString("es-CO")} m²` : `≈ ${km2.toFixed(2)} km²`;
 }
 
-// Pin de cliente más chico que el marcador rojo por defecto de Google (que
-// se ve enorme con miles de clientes). Ancho/alto ~20x27 en vez de ~27x43.
-const PIN_CLIENTE_ANCHO = 20;
-const PIN_CLIENTE_ALTO = 27;
+// Pin de cliente: un punto (círculo) chico y liviano, no un pin-globo. Con
+// miles de clientes, un pin con "punta" (teardrop) que se solapa con los
+// círculos de clúster se ve raro (la punta queda tapada a medias detrás del
+// círculo verde, como una "mordida"); un círculo centrado igual que el
+// clúster se solapa limpio, sin ese artefacto visual. Un solo objeto Icon
+// se crea UNA vez y se reutiliza en los ~4600 marcadores (si se crea un
+// Icon nuevo -con su propio string SVG- por cada marcador, son miles de
+// asignaciones de memoria repetidas por gusto: la causa principal de que
+// el navegador se pusiera lento).
+const PIN_CLIENTE_TAM = 14;
+let iconoPinClienteCache: google.maps.Icon | null = null;
 function iconoPinCliente(): google.maps.Icon {
+  if (iconoPinClienteCache) return iconoPinClienteCache;
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32">` +
-    `<path d="M12 0C5.4 0 0 5.4 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.4 18.6 0 12 0z" fill="#c0392b"/>` +
-    `<circle cx="12" cy="12" r="5" fill="#ffffff"/>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_CLIENTE_TAM}" height="${PIN_CLIENTE_TAM}">` +
+    `<circle cx="${PIN_CLIENTE_TAM / 2}" cy="${PIN_CLIENTE_TAM / 2}" r="${PIN_CLIENTE_TAM / 2 - 1.5}" fill="#c0392b" stroke="#ffffff" stroke-width="1.5"/>` +
     `</svg>`;
-  return {
+  iconoPinClienteCache = {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    scaledSize: new google.maps.Size(PIN_CLIENTE_ANCHO, PIN_CLIENTE_ALTO),
-    anchor: new google.maps.Point(PIN_CLIENTE_ANCHO / 2, PIN_CLIENTE_ALTO),
+    scaledSize: new google.maps.Size(PIN_CLIENTE_TAM, PIN_CLIENTE_TAM),
+    anchor: new google.maps.Point(PIN_CLIENTE_TAM / 2, PIN_CLIENTE_TAM / 2),
   };
+  return iconoPinClienteCache;
 }
 
 // Renderer de clústers (como Google Maps/Uber con miles de puntos): un
 // círculo verde con el conteo adentro, que crece un poco según cuántos
-// clientes agrupa, en vez de amontonar cientos de pines superpuestos.
+// clientes agrupa, en vez de amontonar cientos de pines superpuestos. Los
+// íconos se cachean por tamaño (solo hay 4 tamaños posibles) en vez de
+// generar un SVG nuevo en cada re-render del clúster.
+const iconosClusterCache = new Map<number, google.maps.Icon>();
+function iconoCluster(size: number): google.maps.Icon {
+  const cacheado = iconosClusterCache.get(size);
+  if (cacheado) return cacheado;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 2}" fill="#2f8f4e" fill-opacity="0.85" stroke="#ffffff" stroke-width="2"/>` +
+    `</svg>`;
+  const icono: google.maps.Icon = {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(size, size),
+    anchor: new google.maps.Point(size / 2, size / 2),
+  };
+  iconosClusterCache.set(size, icono);
+  return icono;
+}
 const clusterRenderer: Renderer = {
   render: ({ count, position }) => {
     const size = count < 10 ? 34 : count < 50 ? 42 : count < 200 ? 50 : 58;
-    const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
-      `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 2}" fill="#2f8f4e" fill-opacity="0.85" stroke="#ffffff" stroke-width="2"/>` +
-      `</svg>`;
     return new google.maps.Marker({
       position,
-      icon: {
-        url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-        scaledSize: new google.maps.Size(size, size),
-        anchor: new google.maps.Point(size / 2, size / 2),
-      },
+      icon: iconoCluster(size),
       label: { text: String(count), color: "#ffffff", fontSize: "12px", fontWeight: "700" },
       zIndex: 1000 + count,
     });
   },
 };
+
 
 // El InfoWindow de clientes se arma con innerHTML (Google Maps no ofrece un
 // content de React) — escapar es obligatorio, el nombre/dirección vienen de
@@ -561,14 +580,28 @@ export default function GeozonasPage() {
   // anclado justo encima del pin) y se cierra en "mouseout". Los pines se
   // manejan con un MarkerClusterer: alejado se ven agrupados en círculos
   // con el conteo, acercando el zoom se separan en pines individuales.
+  //
+  // OJO memoria: este efecto NO depende de `zonas` (usa zonasRef.current
+  // adentro del hover) a propósito — si dependiera de `zonas`, cada vez que
+  // se edita/arrastra una geozona se destruirían y recrearían los ~4600
+  // marcadores + sus listeners, que es justo lo que ponía lento el navegador.
+  // Ahora solo se recrean cuando se prende/apaga el switch o llegan datos
+  // nuevos de clientes.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || typeof google === "undefined") return;
 
-    if (!mostrarClientes || !clientesMapa) {
+    function limpiarMarcadores() {
       clustererRef.current?.clearMarkers();
-      for (const m of clienteMarkersRef.current) m.setMap(null);
+      for (const m of clienteMarkersRef.current) {
+        google.maps.event.clearInstanceListeners(m);
+        m.setMap(null);
+      }
       clienteMarkersRef.current = [];
+    }
+
+    if (!mostrarClientes || !clientesMapa) {
+      limpiarMarcadores();
       infoWindowRef.current?.close();
       return;
     }
@@ -578,19 +611,19 @@ export default function GeozonasPage() {
     }
     const infoWindow = infoWindowRef.current;
 
-    clustererRef.current?.clearMarkers();
-    for (const m of clienteMarkersRef.current) m.setMap(null);
+    limpiarMarcadores();
+    const icono = iconoPinCliente();
     clienteMarkersRef.current = clientesMapa.map((c) => {
       const marker = new google.maps.Marker({
         position: { lat: c.lat, lng: c.lon },
-        icon: iconoPinCliente(),
+        icon: icono,
         title: c.nombre,
         zIndex: 1,
       });
       marker.addListener("mouseover", () => {
-        // Geozona detectada en vivo (point-in-polygon contra los polígonos ya
-        // cargados en el mapa), solo para mostrarla en el mini-modal.
-        const zona = zonas.find((z) => puntoEnPoligono({ lat: c.lat, lng: c.lon }, z.poligono));
+        // zonasRef (no `zonas` capturada al crear el marcador) para que
+        // esta lista de ~4600 marcadores no dependa de los cambios de zonas.
+        const zona = zonasRef.current.find((z) => puntoEnPoligono({ lat: c.lat, lng: c.lon }, z.poligono));
         infoWindow.setContent(
           `<div style="font:13px system-ui,sans-serif;max-width:220px;padding:2px 2px">` +
             `<strong style="color:#14352a">${escapeHtml(c.nombre)}</strong>` +
@@ -609,7 +642,13 @@ export default function GeozonasPage() {
       clustererRef.current = new MarkerClusterer({ map, renderer: clusterRenderer });
     }
     clustererRef.current.addMarkers(clienteMarkersRef.current);
-  }, [mostrarClientes, clientesMapa, zonas]);
+
+    // Al desmontar la página (o antes de volver a correr este efecto) hay
+    // que soltar los marcadores explícitamente: Google Maps no los libera
+    // solo porque el componente de React se desmonte.
+    return () => limpiarMarcadores();
+  }, [mostrarClientes, clientesMapa]);
+
 
   function cancelarNuevaZona() {
     pendingOverlayRef.current?.setMap(null);
