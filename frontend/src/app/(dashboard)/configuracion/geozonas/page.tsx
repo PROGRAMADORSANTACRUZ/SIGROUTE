@@ -48,18 +48,25 @@ const PIN_CLIENTE_ALTO = 27;
 let iconoPinClienteCache: google.maps.Icon | null = null;
 function iconoPinCliente(): google.maps.Icon {
   if (iconoPinClienteCache) return iconoPinClienteCache;
+  // OJO: el <svg> necesita width/height explícitos además del viewBox. Sin
+  // ellos, algunos navegadores le dan al SVG un tamaño "natural" por defecto
+  // de 300x150 y luego lo recortan al tamaño chico del ícono (scaledSize)
+  // desde la esquina superior izquierda -- se ve como si el pin saliera
+  // "cortado" mostrando solo un pedacito, en vez de escalar el dibujo entero.
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">` +
     `<path d="M12 0C5.4 0 0 5.4 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.4 18.6 0 12 0z" fill="#c0392b"/>` +
     `<circle cx="12" cy="12" r="5" fill="#ffffff"/>` +
     `</svg>`;
   iconoPinClienteCache = {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    size: new google.maps.Size(24, 32),
     scaledSize: new google.maps.Size(PIN_CLIENTE_ANCHO, PIN_CLIENTE_ALTO),
     anchor: new google.maps.Point(PIN_CLIENTE_ANCHO / 2, PIN_CLIENTE_ALTO),
   };
   return iconoPinClienteCache;
 }
+
 
 // El InfoWindow de clientes se arma con innerHTML (Google Maps no ofrece un
 // content de React) — escapar es obligatorio, el nombre/dirección vienen de
