@@ -61,6 +61,7 @@ export const MODULOS: ModuloGrupo[] = [
       { label: "Conductores", claves: ["config.conductores.ver", "config.conductores.editar"] },
       { label: "Auxiliares", claves: ["config.auxiliares.ver", "config.auxiliares.editar"] },
       { label: "Rutas", claves: ["config.rutas.ver", "config.rutas.editar"] },
+      { label: "Geozonas", claves: ["config.geozonas.ver", "config.geozonas.editar"] },
       { label: "Nombres de planes", claves: ["config.plan_nombres.ver", "config.plan_nombres.editar"] },
     ],
   },

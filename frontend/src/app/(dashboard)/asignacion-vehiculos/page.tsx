@@ -48,6 +48,9 @@ type OrdenGrupo = {
   productos: string[];
   direccion: string | null;
   ruta: string | null;
+  // Geozona detectada por la posición del cliente (Configuración > Geozonas);
+  // se usa para agrupar los pendientes "sin ruta" por zona geográfica.
+  area: string | null;
 };
 
 function agrupar(ordenes: Orden[]): OrdenGrupo[] {
@@ -76,6 +79,7 @@ function agrupar(ordenes: Orden[]): OrdenGrupo[] {
         productos: [],
         direccion: o.direccion ?? null,
         ruta: o.ruta ?? null,
+        area: o.area ?? null,
       };
       map.set(key, g);
     }
@@ -86,6 +90,7 @@ function agrupar(ordenes: Orden[]): OrdenGrupo[] {
     if (o.producto) g.productos.push(o.producto);
     if (!g.direccion && o.direccion) g.direccion = o.direccion;
     if (!g.ruta && o.ruta) g.ruta = o.ruta;
+    if (!g.area && o.area) g.area = o.area;
     if (!g.clienteAsignado && o.clienteAsignado) g.clienteAsignado = o.clienteAsignado;
     if (o.asignadoVehiculo) g.asignado = o.asignadoVehiculo;
     if (o.estado === "Enviado") g.enviado = true;
@@ -298,6 +303,23 @@ export default function AsignacionVehiculosPage() {
     return {
       named: [...named.entries()].sort((a, b) => a[0].localeCompare(b[0])),
       sinRuta,
+    };
+  })();
+
+  // Los pendientes "sin ruta" se subagrupan por geozona (Configuración >
+  // Geozonas) para que el operador vea de un vistazo qué facturas caen en la
+  // misma zona geográfica antes de asignarlas a un vehículo/ruta.
+  const gruposSinRutaPorArea = (() => {
+    const named = new Map<string, OrdenGrupo[]>();
+    const sinArea: OrdenGrupo[] = [];
+    for (const g of gruposPorRuta.sinRuta) {
+      const a = (g.area ?? "").trim();
+      if (a) { const arr = named.get(a) ?? []; arr.push(g); named.set(a, arr); }
+      else sinArea.push(g);
+    }
+    return {
+      named: [...named.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+      sinArea,
     };
   })();
 
@@ -769,40 +791,61 @@ export default function AsignacionVehiculosPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f0f2ee]">
-                    {gruposPorRuta.named.length > 0 ? (
-                      <>
-                        {gruposPorRuta.named.map(([nombre, grupos]) => {
-                          const totalKg = grupos.reduce((s, g) => s + g.totalKg, 0);
-                          const allSel = grupos.every((g) => seleccion.has(g.key));
-                          return (
-                            <Fragment key={`ruta-${nombre}`}>
-                              <tr className="bg-[#eef2f8]">
-                                <td className="px-4 py-2">
-                                  <input type="checkbox" className="h-4 w-4 cursor-pointer accent-[#2f8f4e]" checked={allSel} onChange={() => toggleRuta(grupos)} />
-                                </td>
-                                <td colSpan={7} className="px-4 py-2">
-                                  <span className="inline-flex items-center gap-2 font-semibold text-[#14352a]">
-                                    <svg className="h-4 w-4 text-[#4a6fa5]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
-                                    {nombre}
-                                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#45505e] ring-1 ring-[#dfe4e0]">{grupos.length} factura{grupos.length !== 1 ? "s" : ""} · {totalKg.toFixed(0)} kg</span>
-                                  </span>
-                                </td>
-                              </tr>
-                              {grupos.map((g) => filaOrden(g, true))}
-                            </Fragment>
-                          );
-                        })}
-                        {gruposPorRuta.sinRuta.length > 0 && gruposPorRuta.named.length > 0 && (
-                          <tr className="bg-[#f7faf5]">
-                            <td className="px-4 py-1.5"></td>
-                            <td colSpan={7} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a8794]">Sin ruta</td>
+                    {gruposPorRuta.named.map(([nombre, grupos]) => {
+                      const totalKg = grupos.reduce((s, g) => s + g.totalKg, 0);
+                      const allSel = grupos.every((g) => seleccion.has(g.key));
+                      return (
+                        <Fragment key={`ruta-${nombre}`}>
+                          <tr className="bg-[#eef2f8]">
+                            <td className="px-4 py-2">
+                              <input type="checkbox" className="h-4 w-4 cursor-pointer accent-[#2f8f4e]" checked={allSel} onChange={() => toggleRuta(grupos)} />
+                            </td>
+                            <td colSpan={7} className="px-4 py-2">
+                              <span className="inline-flex items-center gap-2 font-semibold text-[#14352a]">
+                                <svg className="h-4 w-4 text-[#4a6fa5]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
+                                {nombre}
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#45505e] ring-1 ring-[#dfe4e0]">{grupos.length} factura{grupos.length !== 1 ? "s" : ""} · {totalKg.toFixed(0)} kg</span>
+                              </span>
+                            </td>
                           </tr>
-                        )}
-                        {gruposPorRuta.sinRuta.map((g) => filaOrden(g))}
-                      </>
-                    ) : (
-                      pendientesFiltrados.map((g) => filaOrden(g))
+                          {grupos.map((g) => filaOrden(g, true))}
+                        </Fragment>
+                      );
+                    })}
+                    {gruposPorRuta.sinRuta.length > 0 && gruposPorRuta.named.length > 0 && (
+                      <tr className="bg-[#f7faf5]">
+                        <td className="px-4 py-1.5"></td>
+                        <td colSpan={7} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a8794]">Sin ruta</td>
+                      </tr>
                     )}
+                    {gruposSinRutaPorArea.named.map(([area, grupos]) => {
+                      const totalKg = grupos.reduce((s, g) => s + g.totalKg, 0);
+                      const allSel = grupos.every((g) => seleccion.has(g.key));
+                      return (
+                        <Fragment key={`area-${area}`}>
+                          <tr className="bg-[#eef7ee]">
+                            <td className="px-4 py-2">
+                              <input type="checkbox" className="h-4 w-4 cursor-pointer accent-[#2f8f4e]" checked={allSel} onChange={() => toggleRuta(grupos)} />
+                            </td>
+                            <td colSpan={7} className="px-4 py-2">
+                              <span className="inline-flex items-center gap-2 font-semibold text-[#14352a]">
+                                <svg className="h-4 w-4 text-[#2f8f4e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                                Geozona {area}
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-[#45505e] ring-1 ring-[#dfe4e0]">{grupos.length} factura{grupos.length !== 1 ? "s" : ""} · {totalKg.toFixed(0)} kg</span>
+                              </span>
+                            </td>
+                          </tr>
+                          {grupos.map((g) => filaOrden(g, true))}
+                        </Fragment>
+                      );
+                    })}
+                    {gruposSinRutaPorArea.sinArea.length > 0 && gruposSinRutaPorArea.named.length > 0 && (
+                      <tr className="bg-[#f7faf5]">
+                        <td className="px-4 py-1.5"></td>
+                        <td colSpan={7} className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#7a8794]">Sin geozona</td>
+                      </tr>
+                    )}
+                    {gruposSinRutaPorArea.sinArea.map((g) => filaOrden(g))}
                   </tbody>
                 </table>
               </div>

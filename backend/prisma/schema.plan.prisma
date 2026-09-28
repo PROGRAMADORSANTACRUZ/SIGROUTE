@@ -829,6 +829,11 @@ model Orden {
 
   asignadoVehiculo String?
   ruta             String?
+  // Geozona detectada automaticamente por la posicion (lat/lon) del cliente
+  // contra los poligonos de GeoZona (ver Cliente.area, modulo Geozonas) —
+  // nombre de la geozona (ej. "1-BAR"), null si el cliente no tiene lat/lon
+  // o no cae en ninguna geozona.
+  area             String?
   // Fecha de despacho editable (distinta de `fecha`, que viene fija del
   // Excel/factura importada); si se define, la orden se muestra agrupada en
   // Diagrama bajo esta fecha en vez de "hoy".
@@ -842,6 +847,7 @@ model Orden {
   @@index([estado])
   @@index([fecha])
   @@index([ruta])
+  @@index([area])
 }
 
 // Color asignado a una ruta (por nombre, ej. "Ruta 3") para que se vea
@@ -852,6 +858,25 @@ model RutaColor {
   updatedAt DateTime @updatedAt
 
   @@map("ruta_colores")
+}
+
+// Geozona: poligono dibujado en el mapa (modulo Configuracion > Geozonas),
+// usado para asignar automaticamente cada Cliente/Orden a un area segun su
+// lat/lon (point-in-polygon, ver lib/geozonas.ts). "poligono" es un array de
+// puntos [{lat,lng}, ...] en JSON (no PostGIS, no hace falta para el volumen
+// de datos de este proyecto).
+model GeoZona {
+  id        String   @id @default(cuid())
+  nombre    String   @unique @db.VarChar(30)
+  ciudad    String?  @db.VarChar(80)
+  poligono  Json
+  color     String   @default("#2f8f4e") @db.VarChar(9)
+  orden     Int      @default(0)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("geozonas")
 }
 
 model Cliente {
@@ -870,6 +895,10 @@ model Cliente {
   codigoPostal    String?
   lat             String?
   lon             String?
+  // Geozona detectada automaticamente (point-in-polygon contra GeoZona.poligono,
+  // recalculada al geocodificar o al editar geozonas), nombre de la geozona
+  // (ej. "1-BAR"), null si falta lat/lon o no cae en ninguna geozona activa.
+  area            String?
   barrio          String?
   manzana         String?
   lote            String?

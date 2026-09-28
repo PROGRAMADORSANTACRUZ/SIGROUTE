@@ -285,6 +285,10 @@ export interface Orden {
   reenviadoAt: string | null;
   asignadoVehiculo: string | null;
   ruta: string | null;
+  // Geozona detectada automáticamente por la posición del cliente (ver
+  // Configuración > Geozonas); null si el cliente no tiene lat/lon o no cae
+  // en ninguna geozona activa.
+  area?: string | null;
   cargado: boolean;
   cargadoAt: string | null;
   createdAt: string;
@@ -1122,6 +1126,65 @@ export function savePlanNombres(data: PlanNombre[]): Promise<PlanNombre[]> {
     method: "PUT",
     body: JSON.stringify(data),
   });
+}
+
+// ── Geozonas (Configuración > Geozonas) ──────────────────────────────────────
+export interface PuntoLatLng {
+  lat: number;
+  lng: number;
+}
+
+export interface GeoZona {
+  id: string;
+  nombre: string;
+  ciudad?: string | null;
+  poligono: PuntoLatLng[];
+  color: string;
+  orden: number;
+  activo: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeoZonaInput {
+  nombre: string;
+  ciudad?: string | null;
+  poligono: PuntoLatLng[];
+  color?: string;
+  orden?: number;
+  activo?: boolean;
+}
+
+export function getGeoZonas(): Promise<GeoZona[]> {
+  return request<GeoZona[]>("/api/config/geozonas");
+}
+
+export function crearGeoZona(data: GeoZonaInput): Promise<GeoZona> {
+  return request<GeoZona>("/api/config/geozonas", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function editarGeoZona(id: string, data: Partial<GeoZonaInput>): Promise<GeoZona> {
+  return request<GeoZona>(`/api/config/geozonas/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export function eliminarGeoZona(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/config/geozonas/${id}`, { method: "DELETE" });
+}
+
+export interface RecalcularGeoZonasResultado {
+  geozonas: number;
+  clientesActualizados: number;
+  ordenesActualizadas: number;
+}
+
+export function recalcularGeoZonas(): Promise<RecalcularGeoZonasResultado> {
+  return request<RecalcularGeoZonasResultado>("/api/config/geozonas/recalcular", { method: "POST" });
 }
 
 export type TipoCambio = "movimiento" | "anulacion" | "reimpresion" | "liberacion";

@@ -163,6 +163,18 @@ export const editarRuta = (id: number, data: Record<string, unknown>) => req(`/a
 export const eliminarRuta = (id: number) => req(`/asignacion/${id}`, { method: "DELETE" });
 export const cerrarRuta = (id: number) => req(`/asignacion/${id}/cerrar`, { method: "POST" });
 export const reabrirRuta = (id: number) => req(`/asignacion/${id}/reabrir`, { method: "POST" });
+export interface PreasignarGeozonasResultado {
+  rutasCreadas: number;
+  destinosAsignados: number;
+  sinGeozona: number;
+  gruposOmitidosPorLimite?: number;
+  mensaje?: string;
+}
+// Agrupa los destinos pendientes (con kg planificado, sin ruta) por geozona
+// (Configuración > Geozonas, según la posición del cliente) y crea una ruta
+// nueva por cada geozona con destinos.
+export const preasignarPorGeozona = (fecha: string): Promise<PreasignarGeozonasResultado> =>
+  req(`/asignacion/preasignar-geozonas`, { method: "POST", body: JSON.stringify({ fecha }) });
 
 // ── Áreas para Cargar ────────────────────────────────────────────────────
 export const getAreasCarga = (fecha: string) => req(`/areas?fecha=${fecha}`);

@@ -326,4 +326,101 @@ router.post("/:id/reabrir", requirePermiso("asignacion.editar"), async (req, res
   }
 });
 
+// POST /api/planeacion/asignacion/preasignar-geozonas — agrupa los destinos
+// pendientes (con kg planificado, sin ruta asignada aún) por Cliente.area
+// (Configuración > Geozonas) y crea una ruta nueva por cada geozona con
+// destinos, dejando sin tocar los destinos sin geoposición/geozona detectada.
+const preasignarSchema = z.object({ fecha: z.string() });
+router.post("/preasignar-geozonas", requirePermiso("asignacion.editar"), async (req, res, next) => {
+  try {
+    const data = preasignarSchema.parse(req.body);
+    const fecha = parseFecha(data.fecha);
+    const prog = await getProg(fecha);
+
+    const detalleRows = await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { not: null } } });
+    const kgByCliente = new Map(
+      detalleRows
+        .map((d) => [d.clienteId as string, sumaKlsDetalle(d as unknown as Record<string, unknown>)] as const)
+        .filter(([, kg]) => kg > 0)
+    );
+    if (kgByCliente.size === 0) {
+      return res.json({ rutasCreadas: 0, destinosAsignados: 0, sinGeozona: 0, mensaje: "No hay destinos con kilos planificados para esta fecha" });
+    }
+
+    const rutasProg = await prisma.planRuta.findMany({
+      where: { progId: prog.id },
+      select: { destinos: { select: { clienteId: true } } },
+    });
+    const ocupados = new Set(rutasProg.flatMap((r) => r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x)));
+
+    const pendientesIds = [...kgByCliente.keys()].filter((id) => !ocupados.has(id));
+    if (pendientesIds.length === 0) {
+      return res.json({ rutasCreadas: 0, destinosAsignados: 0, sinGeozona: 0, mensaje: "Todos los destinos con kilos ya están asignados a una ruta" });
+    }
+
+    const clientes = await prisma.cliente.findMany({
+      where: { id: { in: pendientesIds } },
+      select: { id: true, area: true },
+    });
+    const porArea = new Map<string, string[]>();
+    let sinGeozona = 0;
+    for (const c of clientes) {
+      if (!c.area) { sinGeozona++; continue; }
+      const arr = porArea.get(c.area) ?? [];
+      arr.push(c.id);
+      porArea.set(c.area, arr);
+    }
+
+    if (porArea.size === 0) {
+      return res.json({ rutasCreadas: 0, destinosAsignados: 0, sinGeozona, mensaje: "Ninguno de los destinos pendientes cae en una geozona (falta geoposición o geozonas definidas)" });
+    }
+
+    const max = MAX_RUTAS[INSTANCIA] ?? 12;
+    const countActual = await prisma.planRuta.count({ where: { progId: prog.id } });
+    const cupo = Math.max(0, max - countActual);
+    const gruposAreaOrdenados = [...porArea.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const gruposACrear = gruposAreaOrdenados.slice(0, cupo);
+    const gruposOmitidos = gruposAreaOrdenados.length - gruposACrear.length;
+
+    const maxNum = await prisma.planRuta.aggregate({ where: { progId: prog.id }, _max: { numeroRuta: true } });
+    let siguienteNumero = (maxNum._max.numeroRuta ?? 0) + 1;
+    let destinosAsignados = 0;
+
+    for (const [area, clienteIds] of gruposACrear) {
+      const peso = clienteIds.reduce((acc, id) => acc + (kgByCliente.get(id) ?? 0), 0);
+      await prisma.planRuta.create({
+        data: {
+          progId: prog.id,
+          numeroRuta: siguienteNumero++,
+          ruta: area,
+          pesoTotal: peso,
+          destinos: {
+            createMany: {
+              data: clienteIds.map((clienteId, i) => ({ clienteId, orden: i + 1, kilos: kgByCliente.get(clienteId) ?? 0 })),
+            },
+          },
+        },
+      });
+      destinosAsignados += clienteIds.length;
+    }
+
+    await auditLog(
+      req.user!.username,
+      "PREASIGNAR",
+      "Preasignación",
+      `${gruposACrear.length} ruta(s) por geozona, ${destinosAsignados} destino(s)`,
+      INSTANCIA
+    );
+
+    res.json({
+      rutasCreadas: gruposACrear.length,
+      destinosAsignados,
+      sinGeozona,
+      gruposOmitidosPorLimite: gruposOmitidos,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

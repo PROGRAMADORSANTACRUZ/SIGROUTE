@@ -191,6 +191,7 @@ const navGroups: NavGroup[] = [
       { href: "/configuracion/conductores", label: "Conductores", icon: usersIcon },
       { href: "/configuracion/auxiliares", label: "Auxiliares", icon: usersIcon },
       { href: "/configuracion/rutas", label: "Rutas", icon: rutaIcon },
+      { href: "/configuracion/geozonas", label: "Geozonas", icon: mapPinIcon },
       { href: "/configuracion/plan-nombres", label: "Nombres de planes", icon: planNombreIcon },
     ],
   },

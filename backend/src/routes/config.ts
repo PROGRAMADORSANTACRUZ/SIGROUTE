@@ -4,6 +4,7 @@ import { prismaPlan as prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { AUXILIARES_DEFAULT, RUTAS_DEFAULT, PLAN_NOMBRES_DEFAULT } from "../data/configDefaults";
+import { detectarArea, type PuntoLatLng } from "../lib/geozonas";
 
 const router = Router();
 
@@ -188,6 +189,134 @@ router.delete("/cambios/hechos", requireAuth, requirePermiso("distrilog.planific
   try {
     const { count } = await prisma.cambioDespacho.deleteMany({ where: { hecho: true } });
     res.json({ eliminados: count });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Geozonas ─────────────────────────────────────────────────────────────────
+const puntoSchema = z.object({ lat: z.coerce.number(), lng: z.coerce.number() });
+const geozonaSchema = z.object({
+  nombre: z.string().trim().min(1).max(30),
+  ciudad: z.string().trim().optional().nullable(),
+  poligono: z.array(puntoSchema).min(3, "Un polígono necesita al menos 3 puntos"),
+  color: z.string().trim().optional(),
+  orden: z.coerce.number().int().optional(),
+  activo: z.coerce.boolean().optional(),
+});
+
+router.get("/geozonas", requireAuth, async (_req, res, next) => {
+  try {
+    res.json(await prisma.geoZona.findMany({ orderBy: [{ orden: "asc" }, { nombre: "asc" }] }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/geozonas", requireAuth, requirePermiso("config.geozonas.editar"), async (req, res, next) => {
+  try {
+    const parsed = geozonaSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0].message);
+    const gz = await prisma.geoZona.create({
+      data: {
+        nombre: parsed.data.nombre,
+        ciudad: parsed.data.ciudad ?? null,
+        poligono: parsed.data.poligono,
+        color: parsed.data.color ?? undefined,
+        orden: parsed.data.orden ?? 0,
+        activo: parsed.data.activo ?? true,
+      },
+    });
+    res.status(201).json(gz);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/geozonas/:id", requireAuth, requirePermiso("config.geozonas.editar"), async (req, res, next) => {
+  try {
+    const parsed = geozonaSchema.partial().safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, parsed.error.issues[0].message);
+    const gz = await prisma.geoZona.update({
+      where: { id: String(req.params.id) },
+      data: {
+        ...(parsed.data.nombre !== undefined ? { nombre: parsed.data.nombre } : {}),
+        ...(parsed.data.ciudad !== undefined ? { ciudad: parsed.data.ciudad } : {}),
+        ...(parsed.data.poligono !== undefined ? { poligono: parsed.data.poligono } : {}),
+        ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
+        ...(parsed.data.orden !== undefined ? { orden: parsed.data.orden } : {}),
+        ...(parsed.data.activo !== undefined ? { activo: parsed.data.activo } : {}),
+      },
+    });
+    res.json(gz);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/geozonas/:id", requireAuth, requirePermiso("config.geozonas.editar"), async (req, res, next) => {
+  try {
+    await prisma.geoZona.delete({ where: { id: String(req.params.id) } });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Recalcula Cliente.area y Orden.area para TODOS los registros, contra las
+// geozonas activas actuales (point-in-polygon con turf.js) — se llama tras
+// crear/editar/borrar una geozona, o manualmente desde el módulo Geozonas.
+router.post("/geozonas/recalcular", requireAuth, requirePermiso("config.geozonas.editar"), async (_req, res, next) => {
+  try {
+    const geozonas = await prisma.geoZona.findMany({
+      where: { activo: true },
+      orderBy: [{ orden: "asc" }, { nombre: "asc" }],
+    });
+    const geozonasParaMatch = geozonas.map((g) => ({
+      id: g.id,
+      nombre: g.nombre,
+      poligono: g.poligono as unknown as PuntoLatLng[],
+    }));
+
+    const clientes = await prisma.cliente.findMany({ where: { activo: true }, select: { id: true, lat: true, lon: true, area: true } });
+    const idsPorArea = new Map<string | null, string[]>();
+    let clientesActualizados = 0;
+    for (const c of clientes) {
+      const lat = c.lat ? parseFloat(c.lat) : NaN;
+      const lon = c.lon ? parseFloat(c.lon) : NaN;
+      const nuevaArea = detectarArea(lat, lon, geozonasParaMatch);
+      if (nuevaArea !== c.area) {
+        clientesActualizados++;
+        const arr = idsPorArea.get(nuevaArea) ?? [];
+        arr.push(c.id);
+        idsPorArea.set(nuevaArea, arr);
+      }
+    }
+    for (const [area, ids] of idsPorArea) {
+      await prisma.cliente.updateMany({ where: { id: { in: ids } }, data: { area } });
+    }
+
+    // Propaga el área del cliente a cada Orden asociada (clienteSistemaId ===
+    // Cliente.id); las órdenes sin cliente resuelto (sinResolver) quedan null.
+    // Se agrupa por área para actualizar en pocas consultas masivas en vez de
+    // una por cliente (evita miles de round-trips al Postgres remoto).
+    const clientesConArea = await prisma.cliente.findMany({ where: { activo: true }, select: { id: true, area: true } });
+    const clientesIdsPorArea = new Map<string | null, string[]>();
+    for (const c of clientesConArea) {
+      const arr = clientesIdsPorArea.get(c.area) ?? [];
+      arr.push(c.id);
+      clientesIdsPorArea.set(c.area, arr);
+    }
+    let ordenesActualizadas = 0;
+    for (const [area, clienteIds] of clientesIdsPorArea) {
+      const { count } = await prisma.orden.updateMany({
+        where: { clienteSistemaId: { in: clienteIds }, area: { not: area } },
+        data: { area },
+      });
+      ordenesActualizadas += count;
+    }
+
+    res.json({ geozonas: geozonas.length, clientesActualizados, ordenesActualizadas });
   } catch (err) {
     next(err);
   }

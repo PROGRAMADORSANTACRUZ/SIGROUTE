@@ -49,6 +49,8 @@ const envSchema = z.object({
   // deben seguir desde ahí en vez de reiniciar en OSRun00001 y chocar/quedar
   // desalineados con lo que ya está allá.
   ERRANDS_NUMERO_PEDIDO_BASE: z.coerce.number().default(1755),
+  // Geocoding API (Google Maps Platform) — geozonas de rutas.
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
