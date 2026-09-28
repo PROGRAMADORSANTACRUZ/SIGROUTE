@@ -11,7 +11,6 @@ services:
       args:
         # Vacío = el frontend llama a /api en el mismo dominio (vía Nginx/Traefik).
         NEXT_PUBLIC_API_URL: ""
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     container_name: sigroute-sigrouteapp-kpkfv4
     environment:
       NODE_ENV: production

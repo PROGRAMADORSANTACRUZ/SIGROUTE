@@ -27,8 +27,9 @@ RUN npm run db:generate -w backend
 # URL del API para el frontend (vacío = mismo origen /api vía Nginx)
 ARG NEXT_PUBLIC_API_URL=""
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=""
-ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+# La key de Google Maps NO se pasa como build-arg: Dokploy no reenvía las env
+# vars del panel al build de Docker, así que el frontend la pide en tiempo de
+# ejecución a GET /api/config/maps-key (ver frontend/src/lib/googleMaps.ts).
 
 # Compila backend (tsc) y frontend (next build)
 RUN npm run build -w backend && npm run build -w frontend

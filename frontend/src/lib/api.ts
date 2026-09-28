@@ -1,5 +1,5 @@
 // Vacío para que las llamadas sean relativas (/api/...) y pasen por el proxy de Next.js.
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export interface AuthUser {
   id: number;

@@ -5,8 +5,17 @@ import { HttpError } from "../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../middleware/auth";
 import { AUXILIARES_DEFAULT, RUTAS_DEFAULT, PLAN_NOMBRES_DEFAULT } from "../data/configDefaults";
 import { detectarArea, type PuntoLatLng } from "../lib/geozonas";
+import { env } from "../config/env";
 
 const router = Router();
+
+// Expone la key de Google Maps al navegador EN TIEMPO DE EJECUCIÓN (no vía
+// NEXT_PUBLIC_* inlineado en el build) — Dokploy no reenvía las env vars del
+// panel como build-args de Docker, así que un NEXT_PUBLIC_* nunca llegaba al
+// bundle del frontend en producción aunque sí estuviera seteado en Dokploy.
+router.get("/maps-key", requireAuth, (_req, res) => {
+  res.json({ apiKey: env.GOOGLE_MAPS_API_KEY || null });
+});
 
 // ── Auxiliares ───────────────────────────────────────────────────────────────
 const auxiliarSchema = z.object({
