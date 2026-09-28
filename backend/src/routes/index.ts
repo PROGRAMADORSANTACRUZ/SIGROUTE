@@ -11,6 +11,7 @@ import novedadesRouter from "./novedades";
 import configRouter from "./config";
 import planeacionRouter from "./planeacion";
 import errandsRouter from "./errands";
+import provisioningRouter from "./provisioning";
 // NOTA: el antiguo `users.ts` (gestión simple de usuarios de DISTRILOG) fue
 // retirado — el módulo "Usuarios" (con roles/permisos granulares) de
 // rutas_web lo reemplaza por completo (ver routes/planeacion/usuarios.ts).
@@ -29,5 +30,6 @@ router.use("/novedades", novedadesRouter);
 router.use("/config", configRouter);
 router.use("/planeacion", planeacionRouter);
 router.use("/errands", errandsRouter);
+router.use("/provisioning", provisioningRouter);
 
 export default router;
