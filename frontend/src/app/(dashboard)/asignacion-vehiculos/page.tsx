@@ -180,6 +180,9 @@ export default function AsignacionVehiculosPage() {
   // Filtro por tipo de distribución en órdenes pendientes.
   const [filtroDist, setFiltroDist] = useState<"" | "TAT" | "GS">("");
   const [filtroSub, setFiltroSub] = useState<string>("");
+  // Filtro por geozona (Configuración > Geozonas) para ver de un vistazo los
+  // pendientes de una sola zona geográfica. "__SIN__" = sin geozona detectada.
+  const [filtroArea, setFiltroArea] = useState<string>("");
   const [verDiagrama, setVerDiagrama] = useState(false);
   const [buscarAsig, setBuscarAsig] = useState("");
   const [seleccionAsig, setSeleccionAsig] = useState<Set<string>>(new Set());
@@ -281,10 +284,16 @@ export default function AsignacionVehiculosPage() {
   const asignadasPorPlaca = (placa: string) =>
     pendientes.filter((g) => g.asignado === placa);
 
+  // Geozonas presentes entre los pendientes (para poblar el filtro), en orden
+  // alfabético; "__SIN__" se agrega aparte solo si hay pendientes sin geozona.
+  const areasDisponibles = [...new Set(sinAsignarGrupos.map((g) => (g.area ?? "").trim()).filter(Boolean))].sort();
+  const hayPendientesSinArea = sinAsignarGrupos.some((g) => !g.area);
+
   const to = buscarOrd.trim().toLowerCase();
   const pendientesFiltrados = sinAsignarGrupos
     .filter((g) => (filtroDist === "" ? true : filtroDist === "TAT" ? g.distribucion === "TAT" : g.distribucion !== "TAT"))
     .filter((g) => (filtroDist === "" ? true : matchSub(g, filtroDist, filtroSub)))
+    .filter((g) => (filtroArea === "" ? true : filtroArea === "__SIN__" ? !g.area : g.area === filtroArea))
     .filter((g) =>
       to
         ? [g.numeroOrden, g.cliente, g.destino].some((f) => f?.toLowerCase().includes(to))
@@ -757,6 +766,19 @@ export default function AsignacionVehiculosPage() {
                       </>
                     )}
                   </div>
+                  {(areasDisponibles.length > 0 || hayPendientesSinArea) && (
+                    <select
+                      value={filtroArea}
+                      onChange={(e) => setFiltroArea(e.target.value)}
+                      className="rounded-full border border-[#dfe4e0] bg-white px-3 py-1 text-xs font-medium text-[#45505e] outline-none focus:border-[#2f8f4e]"
+                    >
+                      <option value="">Todas las geozonas</option>
+                      {areasDisponibles.map((a) => (
+                        <option key={a} value={a}>{a}</option>
+                      ))}
+                      {hayPendientesSinArea && <option value="__SIN__">Sin geozona</option>}
+                    </select>
+                  )}
                   {rechazadosGrupos.length > 0 && (
                     <button
                       onClick={() => setVerRechazados(true)}
