@@ -9,6 +9,7 @@ import { INSTANCIA } from "../../lib/planCategorias";
 import { log as auditLog } from "../../lib/auditoria";
 import { sincronizarSiVencido } from "../../lib/syncMaestros";
 import { calcularFlete } from "../../lib/fletes";
+import { detectarArea, type PuntoLatLng } from "../../lib/geozonas";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("asignacion.ver"));
@@ -360,15 +361,24 @@ router.post("/preasignar-geozonas", requirePermiso("asignacion.editar"), async (
 
     const clientes = await prisma.cliente.findMany({
       where: { id: { in: pendientesIds } },
-      select: { id: true, area: true },
+      select: { id: true, lat: true, lon: true },
     });
+    // Geozona detectada EN VIVO (lat/lon del cliente contra los polígonos
+    // activos actuales), no la columna Cliente.area guardada — así no hace
+    // falta haber corrido "Recalcular áreas" después de editar una geozona o
+    // de que lleguen clientes nuevos.
+    const geozonasActivas = await prisma.geoZona.findMany({ where: { activo: true }, orderBy: [{ orden: "asc" }, { nombre: "asc" }] });
+    const geozonasParaMatch = geozonasActivas.map((g) => ({ id: g.id, nombre: g.nombre, poligono: g.poligono as unknown as PuntoLatLng[] }));
     const porArea = new Map<string, string[]>();
     let sinGeozona = 0;
     for (const c of clientes) {
-      if (!c.area) { sinGeozona++; continue; }
-      const arr = porArea.get(c.area) ?? [];
+      const lat = c.lat ? parseFloat(c.lat) : NaN;
+      const lon = c.lon ? parseFloat(c.lon) : NaN;
+      const area = detectarArea(lat, lon, geozonasParaMatch);
+      if (!area) { sinGeozona++; continue; }
+      const arr = porArea.get(area) ?? [];
       arr.push(c.id);
-      porArea.set(c.area, arr);
+      porArea.set(area, arr);
     }
 
     if (porArea.size === 0) {

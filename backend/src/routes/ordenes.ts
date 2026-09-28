@@ -14,6 +14,7 @@ import {
 } from "../lib/drivinAddresses";
 import { esDespacho, fetchFacturasRango, type TatInvoiceRaw } from "../lib/siesaPedido";
 import { calcularFlete, capacidadEfectiva } from "../lib/fletes";
+import { detectarArea, type PuntoLatLng } from "../lib/geozonas";
 
 const router = Router();
 
@@ -388,19 +389,35 @@ router.get("/", requireAuth, async (req, res, next) => {
     // ?all=true devuelve todas; por defecto solo activas (excluye Entregado/Rechazado)
     // para reducir payload en el cliente (el sistema solo necesita las activas)
     const todas = req.query.all === "true";
-    const [ordenes, clientesGS] = await Promise.all([
+    const [ordenes, clientesGS, geozonas] = await Promise.all([
       prisma.orden.findMany({
         where: todas ? undefined : { estado: { notIn: ["Entregado", "Rechazado"] } },
         orderBy: [{ cliente: "asc" }, { destino: "asc" }, { numeroOrden: "asc" }],
       }),
       // Cliente es ahora la única fuente de verdad (Distribución + TAT unificados).
       prisma.cliente.findMany({
-        select: { cliente: true, nombreDireccion: true, direccion: true, codigoDireccion: true, consecutivos: true, tipo: true },
+        select: { id: true, lat: true, lon: true, cliente: true, nombreDireccion: true, direccion: true, codigoDireccion: true, consecutivos: true, tipo: true },
       }),
+      // Geozonas activas para detectar el área EN VIVO (no se guarda en BD ni
+      // depende de haber corrido "Recalcular áreas" antes) — point-in-polygon
+      // con turf.js sobre lat/lon, sin llamadas a APIs externas.
+      prisma.geoZona.findMany({ where: { activo: true }, orderBy: [{ orden: "asc" }, { nombre: "asc" }] }),
     ]);
+    const geozonasParaMatch = geozonas.map((g) => ({ id: g.id, nombre: g.nombre, poligono: g.poligono as unknown as PuntoLatLng[] }));
+    // Área por Cliente.id, calculada una sola vez por cliente (no por línea de
+    // orden) ya que varias órdenes comparten el mismo clienteSistemaId.
+    const areaPorClienteId = new Map<string, string | null>();
+    for (const c of clientesGS) {
+      const lat = c.lat ? parseFloat(c.lat) : NaN;
+      const lon = c.lon ? parseFloat(c.lon) : NaN;
+      areaPorClienteId.set(c.id, detectarArea(lat, lon, geozonasParaMatch));
+    }
 
     // Datos actuales del maestro (GS + TAT) por consecutivo y por código (fuente de verdad editable).
-    type MaestroInfo = { nombre?: string; direccion?: string; codigo?: string };
+    // `id` (Cliente.id) viaja junto para poder resolver la geozona EN VIVO con
+    // la MISMA identidad de cliente que ya se usa para refrescar la dirección
+    // (evita depender de Orden.clienteSistemaId, que nunca se llena para TAT).
+    type MaestroInfo = { id: string; nombre?: string; direccion?: string; codigo?: string };
     const gsPorConsecutivo = new Map<string, MaestroInfo>();
     const gsPorCodigo = new Map<string, MaestroInfo>();
     // Ruteo explícito: NIT-sucursal agregado como concatenado en OTRO cliente destino.
@@ -417,7 +434,7 @@ router.get("/", requireAuth, async (req, res, next) => {
     for (const c of clientesGS) {
       const dir = (c.direccion ?? "").trim();
       const nombre = (c.cliente ?? c.nombreDireccion ?? "").trim();
-      const info: MaestroInfo = {};
+      const info: MaestroInfo = { id: c.id };
       if (dir) info.direccion = dir;
       if (nombre) info.nombre = nombre;
       if (c.codigoDireccion) info.codigo = c.codigoDireccion.trim();
@@ -441,7 +458,7 @@ router.get("/", requireAuth, async (req, res, next) => {
       if (c.tipo !== "TAT" || !c.codigoDireccion) continue;
       const dir = (c.direccion ?? "").trim();
       const nombre = (c.cliente ?? c.nombreDireccion ?? "").trim();
-      const info: MaestroInfo = {};
+      const info: MaestroInfo = { id: c.id };
       if (dir.length >= 2 && !NO_DIRECCION_TAT.has(dir.toUpperCase())) info.direccion = dir;
       if (nombre) info.nombre = nombre;
       if (!info.direccion && !info.nombre) continue;
@@ -472,9 +489,17 @@ router.get("/", requireAuth, async (req, res, next) => {
       const sobre =
         !!asignado?.nombre &&
         claveCliente(asignado.nombre) !== claveCliente(o.cliente);
-      if (!direccion && !sobre) return o;
+      // Geozona detectada EN VIVO (no la columna `area` guardada, que puede
+      // estar desactualizada). Usa la MISMA identidad de cliente resuelta
+      // arriba para la dirección (asignado/info por NIT/código/consecutivo);
+      // clienteSistemaId queda solo de respaldo (Bovino/Porcino por Excel lo
+      // trae directo, pero TAT nunca lo llena).
+      const idResuelto = asignado?.id ?? info?.id ?? o.clienteSistemaId ?? null;
+      const areaViva = idResuelto ? areaPorClienteId.get(idResuelto) ?? null : null;
+      if (!direccion && !sobre) return { ...o, area: areaViva };
       return {
         ...o,
+        area: areaViva,
         ...(direccion ? { direccion } : {}),
         ...(sobre
           ? {
