@@ -222,6 +222,32 @@ router.get("/geozonas", requireAuth, async (_req, res, next) => {
   }
 });
 
+// Puntos livianos (solo lo que hace falta para un pin + tooltip en el mapa)
+// de todos los clientes con geoposición — separado de GET /api/clientes
+// (que trae el registro completo, mucho más pesado) para no cargar de más
+// cuando solo se necesita pintar el mapa de Geozonas.
+router.get("/geozonas/clientes-mapa", requireAuth, async (_req, res, next) => {
+  try {
+    const clientes = await prisma.cliente.findMany({
+      where: { activo: true, lat: { not: null }, lon: { not: null } },
+      select: { id: true, cliente: true, nombreDireccion: true, direccion: true, telefono: true, lat: true, lon: true },
+    });
+    const puntos = clientes
+      .map((c) => ({
+        id: c.id,
+        nombre: c.cliente || c.nombreDireccion || "(sin nombre)",
+        direccion: c.direccion,
+        telefono: c.telefono,
+        lat: parseFloat(c.lat ?? ""),
+        lon: parseFloat(c.lon ?? ""),
+      }))
+      .filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon));
+    res.json(puntos);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post("/geozonas", requireAuth, requirePermiso("config.geozonas.editar"), async (req, res, next) => {
   try {
     const parsed = geozonaSchema.safeParse(req.body);

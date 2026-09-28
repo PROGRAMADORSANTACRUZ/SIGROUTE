@@ -1214,6 +1214,21 @@ export function recalcularGeoZonas(): Promise<RecalcularGeoZonasResultado> {
   return request<RecalcularGeoZonasResultado>("/api/config/geozonas/recalcular", { method: "POST" });
 }
 
+// Puntos livianos de clientes con geoposición, para pintar pines en el mapa
+// de Geozonas (separado de getClientes(), que trae el registro completo).
+export interface ClienteMapa {
+  id: string;
+  nombre: string;
+  direccion: string | null;
+  telefono: string | null;
+  lat: number;
+  lon: number;
+}
+
+export function getClientesMapa(): Promise<ClienteMapa[]> {
+  return request<ClienteMapa[]>("/api/config/geozonas/clientes-mapa");
+}
+
 export type TipoCambio = "movimiento" | "anulacion" | "reimpresion" | "liberacion";
 
 export interface CambioDespacho {

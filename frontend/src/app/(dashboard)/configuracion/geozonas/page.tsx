@@ -7,11 +7,13 @@ import {
   editarGeoZona,
   eliminarGeoZona,
   recalcularGeoZonas,
+  getClientesMapa,
   type GeoZona,
   type PuntoLatLng,
+  type ClienteMapa,
 } from "@/lib/api";
 import { loadGoogleMaps } from "@/lib/googleMaps";
-import { areaAproxKm2, circuloAPoligono, distanciaMetros, rectanguloDeEsquinas } from "@/lib/geoDrawing";
+import { areaAproxKm2, circuloAPoligono, distanciaMetros, puntoEnPoligono, rectanguloDeEsquinas } from "@/lib/geoDrawing";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
 
@@ -34,6 +36,14 @@ const HERRAMIENTAS: { modo: ModoDibujo; label: string; hint: string }[] = [
 // Texto "≈ X m²/km²" legible según el tamaño del área.
 function fmtArea(km2: number): string {
   return km2 < 1 ? `≈ ${Math.round(km2 * 1_000_000).toLocaleString("es-CO")} m²` : `≈ ${km2.toFixed(2)} km²`;
+}
+
+// El InfoWindow de clientes se arma con innerHTML (Google Maps no ofrece un
+// content de React) — escapar es obligatorio, el nombre/dirección vienen de
+// datos cargados por Excel/import y no se puede confiar en que no traigan
+// caracteres HTML.
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 }
 
 function anilloCerrado(path: google.maps.MVCArray<google.maps.LatLng>): PuntoLatLng[] {
@@ -74,6 +84,11 @@ export default function GeozonasPage() {
   const previewRectRef = useRef<google.maps.Rectangle | null>(null);
   const previewCircleRef = useRef<google.maps.Circle | null>(null);
   const ultimaMuestraLibreRef = useRef(0);
+  // Pines de clientes (toggle "Mostrar clientes") + un solo InfoWindow
+  // reutilizado para el mini-modal al pasar el mouse (crear uno por cliente
+  // sería carísimo con miles de clientes).
+  const clienteMarkersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
   const [cargandoMapa, setCargandoMapa] = useState(true);
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
@@ -85,6 +100,9 @@ export default function GeozonasPage() {
   const [modoDibujo, setModoDibujo] = useState<ModoDibujo | null>(null);
   const [puntosCount, setPuntosCount] = useState(0);
   const [areaEnCurso, setAreaEnCurso] = useState<number | null>(null);
+  const [mostrarClientes, setMostrarClientes] = useState(false);
+  const [clientesMapa, setClientesMapa] = useState<ClienteMapa[] | null>(null);
+  const [cargandoClientes, setCargandoClientes] = useState(false);
 
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [formNombre, setFormNombre] = useState("");
@@ -479,6 +497,67 @@ export default function GeozonasPage() {
     }
   }, [zonas, editandoId, cargandoMapa]);
 
+  // Carga los clientes (livianos: id/nombre/dirección/teléfono/lat/lon) la
+  // PRIMERA vez que se activa el switch "Mostrar clientes" — no antes, para
+  // no pagar ese payload si nunca se usa.
+  useEffect(() => {
+    if (!mostrarClientes || clientesMapa !== null) return;
+    setCargandoClientes(true);
+    getClientesMapa()
+      .then(setClientesMapa)
+      .catch((err) => {
+        console.error(err);
+        setError("No se pudieron cargar los clientes para el mapa");
+      })
+      .finally(() => setCargandoClientes(false));
+  }, [mostrarClientes, clientesMapa]);
+
+  // Pinta/quita los pines de clientes según el switch. Un solo InfoWindow
+  // compartido se abre en "mouseover" (mini-modal con la info del cliente,
+  // anclado justo encima del pin) y se cierra en "mouseout".
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || typeof google === "undefined") return;
+
+    if (!mostrarClientes || !clientesMapa) {
+      for (const m of clienteMarkersRef.current) m.setMap(null);
+      clienteMarkersRef.current = [];
+      infoWindowRef.current?.close();
+      return;
+    }
+
+    if (!infoWindowRef.current) {
+      infoWindowRef.current = new google.maps.InfoWindow({ disableAutoPan: true });
+    }
+    const infoWindow = infoWindowRef.current;
+
+    for (const m of clienteMarkersRef.current) m.setMap(null);
+    clienteMarkersRef.current = clientesMapa.map((c) => {
+      const marker = new google.maps.Marker({
+        position: { lat: c.lat, lng: c.lon },
+        map,
+        title: c.nombre,
+        zIndex: 1,
+      });
+      marker.addListener("mouseover", () => {
+        // Geozona detectada en vivo (point-in-polygon contra los polígonos ya
+        // cargados en el mapa), solo para mostrarla en el mini-modal.
+        const zona = zonas.find((z) => puntoEnPoligono({ lat: c.lat, lng: c.lon }, z.poligono));
+        infoWindow.setContent(
+          `<div style="font:13px system-ui,sans-serif;max-width:220px;padding:2px 2px">` +
+            `<strong style="color:#14352a">${escapeHtml(c.nombre)}</strong>` +
+            (c.direccion ? `<br/><span style="color:#5f7a68">${escapeHtml(c.direccion)}</span>` : "") +
+            (c.telefono ? `<br/><span style="color:#5f7a68">Tel: ${escapeHtml(c.telefono)}</span>` : "") +
+            (zona ? `<br/><span style="color:${zona.color};font-weight:600">Geozona: ${escapeHtml(zona.nombre)}</span>` : "") +
+            `</div>`
+        );
+        infoWindow.open({ anchor: marker, map });
+      });
+      marker.addListener("mouseout", () => infoWindow.close());
+      return marker;
+    });
+  }, [mostrarClientes, clientesMapa, zonas]);
+
   function cancelarNuevaZona() {
     pendingOverlayRef.current?.setMap(null);
     pendingOverlayRef.current = null;
@@ -616,10 +695,30 @@ export default function GeozonasPage() {
             clientes/facturas por área en Ejecución y para preasignar rutas automáticamente en Planeación.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={mostrarClientes}
+            onClick={() => setMostrarClientes((v) => !v)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+              mostrarClientes ? "bg-[#2f8f4e]" : "bg-[#d7dcd6]"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                mostrarClientes ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+          <span className="text-sm font-medium text-[#45505e]">
+            Mostrar clientes{cargandoClientes ? " (cargando…)" : clientesMapa ? ` (${clientesMapa.length})` : ""}
+          </span>
+          {error && <span className="text-sm text-[#b3261e]">{error}</span>}
+        </div>
         {puedeEditar && (
           <div className="flex flex-wrap items-center gap-2">
             {resultadoRecalculo && <span className="text-xs text-[#2f8f4e]">{resultadoRecalculo}</span>}
-            {error && <span className="text-sm text-[#b3261e]">{error}</span>}
             <button
               onClick={recalcular}
               disabled={recalculando}

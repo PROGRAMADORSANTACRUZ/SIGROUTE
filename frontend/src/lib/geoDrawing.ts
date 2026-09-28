@@ -11,6 +11,23 @@ export interface Punto {
 const RADIO_TIERRA_KM = 6371;
 const RADIO_TIERRA_M = 6371000;
 
+// Point-in-polygon (ray casting) — para etiquetar en el mapa a qué geozona
+// pertenece un cliente sin ir al backend (las geozonas ya están cargadas en
+// el mapa). Misma idea que turf.js/booleanPointInPolygon del backend, pero
+// sin dependencias, para uso puntual en el navegador.
+export function puntoEnPoligono(punto: Punto, poligono: Punto[]): boolean {
+  let dentro = false;
+  for (let i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
+    const pi = poligono[i];
+    const pj = poligono[j];
+    const interseca =
+      pi.lat > punto.lat !== pj.lat > punto.lat &&
+      punto.lng < ((pj.lng - pi.lng) * (punto.lat - pi.lat)) / (pj.lat - pi.lat) + pi.lng;
+    if (interseca) dentro = !dentro;
+  }
+  return dentro;
+}
+
 // Área aproximada de un polígono simple (proyección equirectangular centrada
 // en la latitud promedio) — suficientemente precisa a escala de ciudad, NO
 // pensada para límites administrativos exactos.
