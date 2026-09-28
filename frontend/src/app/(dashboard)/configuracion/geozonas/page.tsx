@@ -48,6 +48,10 @@ export default function GeozonasPage() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlaysRef = useRef<Map<string, google.maps.Polygon>>(new Map());
   const pendingOverlayRef = useRef<google.maps.Polygon | null>(null);
+  // Espejo de `zonas` para que el listener de clic de cada overlay (que se
+  // registra UNA sola vez por zona) siempre pueda leer los datos más
+  // recientes de esa zona, aunque se hayan editado después de dibujarla.
+  const zonasRef = useRef<GeoZona[]>([]);
 
   // Herramienta de dibujo activa. Se necesita también en un ref porque los
   // listeners del mapa se registran UNA sola vez (useEffect []) y deben leer
@@ -131,6 +135,7 @@ export default function GeozonasPage() {
       },
       cursor: esPrimero ? "pointer" : "default",
       title: esPrimero ? "Clic aquí para cerrar la figura" : undefined,
+      clickable: esPrimero,
       zIndex: 1000,
     });
     if (esPrimero) {
@@ -152,6 +157,11 @@ export default function GeozonasPage() {
         fillColor: "#14352a",
         fillOpacity: 0.15,
         strokeWeight: 2,
+        // El relleno del polígono en construcción NO debe capturar clics: si
+        // el usuario marca un punto dentro del área ya cerrada, el clic debe
+        // seguir llegando al mapa para agregar el vértice (si no, a veces "no
+        // se fijaba" el punto porque el propio overlay se lo tragaba).
+        clickable: false,
         map: mapRef.current!,
       });
       pendingOverlayRef.current = preview;
@@ -220,6 +230,7 @@ export default function GeozonasPage() {
     mapRef.current?.setOptions({ draggable: true, disableDoubleClickZoom: false });
     limpiarAyudasDibujo();
     pendingOverlayRef.current?.setEditable(true);
+    pendingOverlayRef.current?.setDraggable(true);
     const puntos = puntosDibujoRef.current.map((p) => ({ lat: p.lat(), lng: p.lng() }));
     setNuevaZona({ nombre: "", ciudad: "", color: COLORES_SUGERIDOS[zonas.length % COLORES_SUGERIDOS.length], areaKm2: areaAproxKm2(puntos) });
   }
@@ -238,6 +249,7 @@ export default function GeozonasPage() {
       fillOpacity: 0.15,
       strokeWeight: 2,
       editable: true,
+      draggable: true,
       map: mapRef.current!,
     });
     pendingOverlayRef.current = overlay;
@@ -282,6 +294,7 @@ export default function GeozonasPage() {
                 strokeColor: "#14352a",
                 strokeOpacity: 0.7,
                 strokeWeight: 2,
+                clickable: false,
                 map,
               });
             } else {
@@ -296,6 +309,7 @@ export default function GeozonasPage() {
                   strokeOpacity: 0.35,
                   strokeWeight: 2,
                   icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "10px" }],
+                  clickable: false,
                   map,
                 });
               } else {
@@ -328,7 +342,7 @@ export default function GeozonasPage() {
               };
               if (!previewRectRef.current) {
                 previewRectRef.current = new google.maps.Rectangle({
-                  bounds, strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, map,
+                  bounds, strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, clickable: false, map,
                 });
               } else {
                 previewRectRef.current.setBounds(bounds);
@@ -339,7 +353,7 @@ export default function GeozonasPage() {
               if (!previewCircleRef.current) {
                 previewCircleRef.current = new google.maps.Circle({
                   center: inicioArrastreRef.current, radius: radio,
-                  strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, map,
+                  strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, clickable: false, map,
                 });
               } else {
                 previewCircleRef.current.setRadius(radio);
@@ -415,8 +429,14 @@ export default function GeozonasPage() {
   }, []);
 
   // Sincroniza los polígonos dibujados en el mapa con la lista de geozonas
-  // guardadas (crea/actualiza/borra overlays según corresponda).
+  // guardadas (crea/actualiza/borra overlays según corresponda). Depende
+  // también de `cargandoMapa`: `zonas` suele llegar de la API ANTES de que el
+  // mapa termine de inicializarse (son 2 cargas asíncronas en paralelo), y
+  // sin esta dependencia el efecto se saltaba silenciosamente esa primera
+  // vez (mapRef.current aún null) y nunca se reintentaba — las geozonas no
+  // aparecían en el mapa hasta el próximo cambio de `zonas`/`editandoId`.
   useEffect(() => {
+    zonasRef.current = zonas;
     const map = mapRef.current;
     if (!map || typeof google === "undefined") return;
 
@@ -439,9 +459,17 @@ export default function GeozonasPage() {
           fillOpacity: 0.2,
           strokeWeight: 2,
           editable: false,
+          draggable: false,
           map,
         });
-        overlay.addListener("click", () => setEditandoId(z.id));
+        // Clic en la figura = mismo efecto que el botón "Editar" del panel
+        // (muestra los vértices y permite arrastrar toda la figura). Busca la
+        // zona actual en zonasRef (no la capturada al crear el overlay) para
+        // no quedarse con nombre/color desactualizados si se editó después.
+        overlay.addListener("click", () => {
+          const actual = zonasRef.current.find((zz) => zz.id === z.id);
+          if (actual) abrirEdicion(actual);
+        });
         overlaysRef.current.set(z.id, overlay);
       } else if (editandoId !== z.id) {
         // No pisar el path mientras el usuario lo está editando en vivo.
@@ -449,7 +477,7 @@ export default function GeozonasPage() {
         overlay.setOptions({ strokeColor: z.color, fillColor: z.color });
       }
     }
-  }, [zonas, editandoId]);
+  }, [zonas, editandoId, cargandoMapa]);
 
   function cancelarNuevaZona() {
     pendingOverlayRef.current?.setMap(null);
@@ -492,16 +520,30 @@ export default function GeozonasPage() {
   }
 
   function abrirEdicion(z: GeoZona) {
+    // Si había otra zona en edición, se le quitan los controles antes de
+    // mostrar los de la nueva (si no, quedaba "editable" huérfana).
+    if (editandoId && editandoId !== z.id) {
+      const anterior = overlaysRef.current.get(editandoId);
+      anterior?.setEditable(false);
+      anterior?.setDraggable(false);
+    }
     setEditandoId(z.id);
     setFormNombre(z.nombre);
     setFormCiudad(z.ciudad ?? "");
     setFormColor(z.color);
     const overlay = overlaysRef.current.get(z.id);
+    // editable = muestra los vértices arrastrables; draggable = permite mover
+    // toda la figura arrastrando su relleno/centro.
     overlay?.setEditable(true);
+    overlay?.setDraggable(true);
   }
 
   function cerrarEdicion(idPrevia: string | null) {
-    if (idPrevia) overlaysRef.current.get(idPrevia)?.setEditable(false);
+    if (idPrevia) {
+      const overlay = overlaysRef.current.get(idPrevia);
+      overlay?.setEditable(false);
+      overlay?.setDraggable(false);
+    }
     setEditandoId(null);
   }
 
