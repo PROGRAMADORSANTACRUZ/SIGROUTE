@@ -18,6 +18,7 @@ import {
   getClientes,
   getOrdenes,
   importOrdenes,
+  sincronizarAgropecuariaConSiesa,
   verificarClientesOrdenes,
   type Cliente,
   type ClienteSinRegistrar,
@@ -309,6 +310,7 @@ export default function OrdenesPage() {
   const tipoRef = useRef<"B" | "P" | "I" | null>(null);
   const [scanOrigen, setScanOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
   const [cargarSiesaOrigen, setCargarSiesaOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
+  const [sincronizandoAgro, setSincronizandoAgro] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -363,6 +365,33 @@ export default function OrdenesPage() {
   function triggerImport(tipo: "B" | "P" | "I") {
     tipoRef.current = tipo;
     fileInputRef.current?.click();
+  }
+
+  // Busca en Siesa (mismo cia=3 que TAT Agropecuaria) las facturas reales de
+  // las órdenes de Bovino/Porcino cargadas por Excel (su numeroOrden sin la
+  // letra B/P), y les completa cufe/qr/firma digital/nit/valor. Busca en un
+  // rango amplio porque la fecha de facturación real puede ser distinta a la
+  // fecha del pedido en el Excel.
+  async function handleSincronizarAgropecuaria() {
+    setSincronizandoAgro(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const hoy = new Date();
+      const hace90 = new Date(hoy);
+      hace90.setDate(hoy.getDate() - 90);
+      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      const r = await sincronizarAgropecuariaConSiesa(iso(hace90), iso(hoy));
+      setMessage(
+        `Siesa: ${r.facturasEncontradas}/${r.facturasBuscadas} facturas encontradas, ${r.ordenesActualizadas} línea(s) actualizadas.` +
+          (r.sinFactura.length ? ` Sin factura en Siesa: ${r.sinFactura.slice(0, 10).join(", ")}${r.sinFactura.length > 10 ? "…" : ""}.` : "")
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo sincronizar con Siesa");
+    } finally {
+      setSincronizandoAgro(false);
+    }
   }
 
   async function handleDelete(tipo?: "B" | "P" | "I" | "AGRO" | "TAT" | "TATAGRO" | "TATINV") {
@@ -908,14 +937,25 @@ export default function OrdenesPage() {
                     <span className="hidden sm:inline">Leer factura</span>
                   </button>
                 ) : (
-                  <button
-                    onClick={() => activeCat.tipo && triggerImport(activeCat.tipo)}
-                    disabled={importing}
-                    className={btn}
-                  >
-                    {importing ? <IconSpin /> : <IconUpload />}
-                    <span className="hidden sm:inline">{importing ? "Importando…" : "Importar"}</span>
-                  </button>
+                  <>
+                    <button
+                      onClick={handleSincronizarAgropecuaria}
+                      disabled={sincronizandoAgro}
+                      title="Busca en Siesa (por el número de factura real, sin la letra B/P) el cufe, QR, firma digital, NIT y valor de estas órdenes"
+                      className={btn}
+                    >
+                      {sincronizandoAgro ? <IconSpin /> : <IconScan />}
+                      <span className="hidden sm:inline">{sincronizandoAgro ? "Sincronizando…" : "Sincronizar con Siesa"}</span>
+                    </button>
+                    <button
+                      onClick={() => activeCat.tipo && triggerImport(activeCat.tipo)}
+                      disabled={importing}
+                      className={btn}
+                    >
+                      {importing ? <IconSpin /> : <IconUpload />}
+                      <span className="hidden sm:inline">{importing ? "Importando…" : "Importar"}</span>
+                    </button>
+                  </>
                 ))}
                 <button
                   onClick={closeCategory}

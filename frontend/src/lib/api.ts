@@ -422,6 +422,24 @@ export function cargarTodasFacturasTat(
   });
 }
 
+export interface SincronizarAgropecuariaResult {
+  rangoConsultado: { fecha: string; fechaFin: string };
+  facturasBuscadas: number;
+  facturasEncontradas: number;
+  ordenesActualizadas: number;
+  sinFactura: string[];
+}
+
+// Completa cufe/qr/firma digital/nit/valor de las órdenes de Grandes
+// Superficies (Bovino/Porcino, cargadas por Excel) buscándolas en Siesa por
+// su número real (numeroOrden sin el prefijo B/P). No toca kg/producto.
+export function sincronizarAgropecuariaConSiesa(fecha: string, fechaFin?: string): Promise<SincronizarAgropecuariaResult> {
+  return request<SincronizarAgropecuariaResult>("/api/ordenes/sincronizar-agropecuaria", {
+    method: "POST",
+    body: JSON.stringify({ fecha, fechaFin }),
+  });
+}
+
 // ── Plantillas TAT (captura masiva sin escanear QR uno a uno) ─────────────
 export interface FilaPlantillaTat {
   fecha: string;

@@ -1657,6 +1657,110 @@ router.post("/factura-todas", requireAuth, requirePermiso("distrilog.ordenes.edi
   }
 });
 
+// El "B"/"P" de numeroOrden (ej. "B48954", "P59448") es un prefijo que
+// AGREGA nuestro sistema para distinguir Bovino/Porcino al cargar el Excel —
+// el número real de factura en Siesa es el resto, sin letra ("48954").
+function numeroBaseDeOrden(numeroOrden: string): string {
+  return String(numeroOrden ?? "").replace(/^[A-Za-z]+/, "").replace(/^0+/, "");
+}
+
+// Extrae el número significativo de "1FE-00048954" -> "48954" (sin ceros a
+// la izquierda), para comparar contra numeroBaseDeOrden().
+function numeroSiesaDeDocumento(nroDocumento: string): string {
+  return /FE-0*(\d+)/.exec(String(nroDocumento ?? ""))?.[1] ?? "";
+}
+
+// POST /api/ordenes/sincronizar-agropecuaria -> completa cufe/qr/firma
+// digital/nit/valor de las facturas de Grandes Superficies (Bovino/Porcino,
+// cargadas por Excel y por eso sin esos datos) buscándolas en Siesa por su
+// número real (numeroOrden sin el prefijo B/P que le agrega este sistema).
+// NO toca kg/producto (la planificación de despacho sigue viniendo del
+// Excel) — solo agrega la info de facturación que Siesa sí tiene.
+// body: { fecha, fechaFin } — rango donde buscar en Siesa (la fecha de
+// FACTURACIÓN real puede ser distinta a la fecha del pedido en el Excel).
+router.post("/sincronizar-agropecuaria", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
+  try {
+    const fecha = String(req.body?.fecha ?? "").trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new HttpError(400, "Fecha inválida");
+    const fechaFin = String(req.body?.fechaFin ?? fecha).trim().slice(0, 10) || fecha;
+
+    const [lineasSiesa, ordenesLocales] = await Promise.all([
+      fetchFacturasRango("AGROPECUARIA", fecha, fechaFin),
+      prisma.orden.findMany({
+        where: { distribucion: "AGROPECUARIA", cufe: null },
+        select: { id: true, numeroOrden: true, cantidadKg: true, nit: true, direccion: true },
+      }),
+    ]);
+    const despacho = lineasSiesa.filter((f) => esDespacho(f.pedido_notas));
+
+    const siesaPorNumero = new Map<string, TatInvoiceRaw[]>();
+    for (const f of despacho) {
+      const num = numeroSiesaDeDocumento(String(f.nro_documento ?? ""));
+      if (!num) continue;
+      const arr = siesaPorNumero.get(num) ?? [];
+      arr.push(f);
+      siesaPorNumero.set(num, arr);
+    }
+
+    const localesPorNumero = new Map<string, typeof ordenesLocales>();
+    for (const o of ordenesLocales) {
+      const num = numeroBaseDeOrden(o.numeroOrden);
+      const arr = localesPorNumero.get(num) ?? [];
+      arr.push(o);
+      localesPorNumero.set(num, arr);
+    }
+
+    let facturasEncontradas = 0;
+    let ordenesActualizadas = 0;
+    const sinFactura: string[] = [];
+    for (const [num, locales] of localesPorNumero) {
+      const filas = siesaPorNumero.get(num);
+      if (!filas || filas.length === 0) {
+        sinFactura.push(locales[0].numeroOrden);
+        continue;
+      }
+      facturasEncontradas++;
+      const nit = String(filas[0].cliente_factura ?? "").trim() || null;
+      const direccionSiesa = String(filas[0].direccion_sucursal ?? "").trim() || null;
+      const cufe = String(filas[0].cufe ?? "").trim().slice(0, 100) || null;
+      const qrTexto = String(filas[0].qr_code_url ?? "").trim().slice(0, 2000) || null;
+      const firmaDigital = String(filas[0].firma_digital ?? "").trim().slice(0, 4000) || null;
+      const totalValorFactura = filas.reduce((s, f) => s + (Number(f.valor_subtotal) || 0), 0);
+      const totalKgLocal = locales.reduce((s, o) => s + o.cantidadKg, 0);
+
+      for (const o of locales) {
+        // El valor se reparte proporcional al peso de cada línea local: Siesa
+        // factura por producto con SU PROPIA descripción (no calza 1:1 con la
+        // del Excel), así que no hay forma exacta de emparejar línea a línea
+        // — esto sí deja el TOTAL de la factura correcto en la suma.
+        const valor = totalKgLocal > 0 ? Math.round((totalValorFactura * (o.cantidadKg / totalKgLocal)) * 100) / 100 : 0;
+        await prisma.orden.update({
+          where: { id: o.id },
+          data: {
+            valor,
+            cufe,
+            qrTexto,
+            firmaDigital,
+            ...(nit && !o.nit ? { nit } : {}),
+            ...(direccionSiesa && !o.direccion ? { direccion: direccionSiesa } : {}),
+          },
+        });
+        ordenesActualizadas++;
+      }
+    }
+
+    res.json({
+      rangoConsultado: { fecha, fechaFin },
+      facturasBuscadas: localesPorNumero.size,
+      facturasEncontradas,
+      ordenesActualizadas,
+      sinFactura,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ════════════════════════════════════════════════════════════════════════
 // PLANTILLAS TAT — captura manual (Agropecuaria/Inversiones) sin "pistolear"
 // el QR uno a uno. Cada fila trae el número de factura + placa/conductor/
