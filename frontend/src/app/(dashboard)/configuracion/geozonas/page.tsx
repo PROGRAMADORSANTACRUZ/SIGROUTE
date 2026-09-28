@@ -16,6 +16,7 @@ import { loadGoogleMaps } from "@/lib/googleMaps";
 import { areaAproxKm2, circuloAPoligono, distanciaMetros, puntoEnPoligono, rectanguloDeEsquinas } from "@/lib/geoDrawing";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
+import { MarkerClusterer, type Renderer } from "@googlemaps/markerclusterer";
 
 // Centro aproximado de la Costa Caribe colombiana (entre Cartagena y Santa
 // Marta), para que al abrir el mapa ya se vean las 5 geozonas sembradas.
@@ -37,6 +38,46 @@ const HERRAMIENTAS: { modo: ModoDibujo; label: string; hint: string }[] = [
 function fmtArea(km2: number): string {
   return km2 < 1 ? `≈ ${Math.round(km2 * 1_000_000).toLocaleString("es-CO")} m²` : `≈ ${km2.toFixed(2)} km²`;
 }
+
+// Pin de cliente más chico que el marcador rojo por defecto de Google (que
+// se ve enorme con miles de clientes). Ancho/alto ~20x27 en vez de ~27x43.
+const PIN_CLIENTE_ANCHO = 20;
+const PIN_CLIENTE_ALTO = 27;
+function iconoPinCliente(): google.maps.Icon {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32">` +
+    `<path d="M12 0C5.4 0 0 5.4 0 12c0 8.5 12 20 12 20s12-11.5 12-20C24 5.4 18.6 0 12 0z" fill="#c0392b"/>` +
+    `<circle cx="12" cy="12" r="5" fill="#ffffff"/>` +
+    `</svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(PIN_CLIENTE_ANCHO, PIN_CLIENTE_ALTO),
+    anchor: new google.maps.Point(PIN_CLIENTE_ANCHO / 2, PIN_CLIENTE_ALTO),
+  };
+}
+
+// Renderer de clústers (como Google Maps/Uber con miles de puntos): un
+// círculo verde con el conteo adentro, que crece un poco según cuántos
+// clientes agrupa, en vez de amontonar cientos de pines superpuestos.
+const clusterRenderer: Renderer = {
+  render: ({ count, position }) => {
+    const size = count < 10 ? 34 : count < 50 ? 42 : count < 200 ? 50 : 58;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+      `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 2}" fill="#2f8f4e" fill-opacity="0.85" stroke="#ffffff" stroke-width="2"/>` +
+      `</svg>`;
+    return new google.maps.Marker({
+      position,
+      icon: {
+        url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+        scaledSize: new google.maps.Size(size, size),
+        anchor: new google.maps.Point(size / 2, size / 2),
+      },
+      label: { text: String(count), color: "#ffffff", fontSize: "12px", fontWeight: "700" },
+      zIndex: 1000 + count,
+    });
+  },
+};
 
 // El InfoWindow de clientes se arma con innerHTML (Google Maps no ofrece un
 // content de React) — escapar es obligatorio, el nombre/dirección vienen de
@@ -86,9 +127,12 @@ export default function GeozonasPage() {
   const ultimaMuestraLibreRef = useRef(0);
   // Pines de clientes (toggle "Mostrar clientes") + un solo InfoWindow
   // reutilizado para el mini-modal al pasar el mouse (crear uno por cliente
-  // sería carísimo con miles de clientes).
+  // sería carísimo con miles de clientes). El clusterer agrupa los pines
+  // cercanos en un círculo con el conteo cuando el mapa está alejado, igual
+  // que Google Maps/Uber, para no saturar la vista con miles de pines.
   const clienteMarkersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const clustererRef = useRef<MarkerClusterer | null>(null);
 
   const [cargandoMapa, setCargandoMapa] = useState(true);
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
@@ -514,12 +558,15 @@ export default function GeozonasPage() {
 
   // Pinta/quita los pines de clientes según el switch. Un solo InfoWindow
   // compartido se abre en "mouseover" (mini-modal con la info del cliente,
-  // anclado justo encima del pin) y se cierra en "mouseout".
+  // anclado justo encima del pin) y se cierra en "mouseout". Los pines se
+  // manejan con un MarkerClusterer: alejado se ven agrupados en círculos
+  // con el conteo, acercando el zoom se separan en pines individuales.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || typeof google === "undefined") return;
 
     if (!mostrarClientes || !clientesMapa) {
+      clustererRef.current?.clearMarkers();
       for (const m of clienteMarkersRef.current) m.setMap(null);
       clienteMarkersRef.current = [];
       infoWindowRef.current?.close();
@@ -531,11 +578,12 @@ export default function GeozonasPage() {
     }
     const infoWindow = infoWindowRef.current;
 
+    clustererRef.current?.clearMarkers();
     for (const m of clienteMarkersRef.current) m.setMap(null);
     clienteMarkersRef.current = clientesMapa.map((c) => {
       const marker = new google.maps.Marker({
         position: { lat: c.lat, lng: c.lon },
-        map,
+        icon: iconoPinCliente(),
         title: c.nombre,
         zIndex: 1,
       });
@@ -556,6 +604,11 @@ export default function GeozonasPage() {
       marker.addListener("mouseout", () => infoWindow.close());
       return marker;
     });
+
+    if (!clustererRef.current) {
+      clustererRef.current = new MarkerClusterer({ map, renderer: clusterRenderer });
+    }
+    clustererRef.current.addMarkers(clienteMarkersRef.current);
   }, [mostrarClientes, clientesMapa, zonas]);
 
   function cancelarNuevaZona() {
