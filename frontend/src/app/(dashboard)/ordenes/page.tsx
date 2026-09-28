@@ -310,7 +310,6 @@ export default function OrdenesPage() {
   const tipoRef = useRef<"B" | "P" | "I" | null>(null);
   const [scanOrigen, setScanOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
   const [cargarSiesaOrigen, setCargarSiesaOrigen] = useState<"AGROPECUARIA" | "INVERSIONES" | null>(null);
-  const [sincronizandoAgro, setSincronizandoAgro] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -348,12 +347,30 @@ export default function OrdenesPage() {
     try {
       const { importados, entregados, rechazados, pendientes, sinCodigo, noCreadas, clientesAutoAsignados } =
         await importOrdenes(file, tipo);
-      setMessage(
+      let msg =
         `Se importaron ${importados}: ${entregados} entregadas, ${rechazados} rechazadas, ${pendientes} pendientes.` +
-          (clientesAutoAsignados ? ` ${clientesAutoAsignados} ${clientesAutoAsignados === 1 ? "cliente se" : "clientes se"} asignaron automático por parecido de nombre.` : "") +
-          (noCreadas ? ` ${noCreadas} ${noCreadas === 1 ? "orden quedó" : "órdenes quedaron"} como "No Creado" (no se encontró el cliente ni por código, destino o nombre).` : "") +
-          (sinCodigo ? ` ${sinCodigo} ${sinCodigo === 1 ? "orden quedó" : "órdenes quedaron"} sin código (regístralas en la verificación de clientes).` : "")
-      );
+        (clientesAutoAsignados ? ` ${clientesAutoAsignados} ${clientesAutoAsignados === 1 ? "cliente se" : "clientes se"} asignaron automático por parecido de nombre.` : "") +
+        (noCreadas ? ` ${noCreadas} ${noCreadas === 1 ? "orden quedó" : "órdenes quedaron"} como "No Creado" (no se encontró el cliente ni por código, destino o nombre).` : "") +
+        (sinCodigo ? ` ${sinCodigo} ${sinCodigo === 1 ? "orden quedó" : "órdenes quedaron"} sin código (regístralas en la verificación de clientes).` : "");
+
+      // Bovino/Porcino: apenas se cargan, se busca de una vez en Siesa (mismo
+      // cia=3 que TAT Agropecuaria) la factura real de cada orden (su
+      // numeroOrden sin la letra B/P) para completar cufe/qr/firma digital/
+      // nit/valor — sin botón aparte, para no sumarle un paso más al usuario.
+      if (tipo === "B" || tipo === "P") {
+        try {
+          const hoy = new Date();
+          const hace90 = new Date(hoy);
+          hace90.setDate(hoy.getDate() - 90);
+          const iso = (d: Date) => d.toISOString().slice(0, 10);
+          const r = await sincronizarAgropecuariaConSiesa(iso(hace90), iso(hoy));
+          msg += ` Siesa: ${r.facturasEncontradas}/${r.facturasBuscadas} facturas encontradas, ${r.ordenesActualizadas} línea(s) completadas con cufe/valor/nit.`;
+        } catch {
+          msg += " (No se pudo sincronizar con Siesa en este momento; se puede reintentar volviendo a cargar el archivo.)";
+        }
+      }
+
+      setMessage(msg);
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error al importar");
@@ -365,33 +382,6 @@ export default function OrdenesPage() {
   function triggerImport(tipo: "B" | "P" | "I") {
     tipoRef.current = tipo;
     fileInputRef.current?.click();
-  }
-
-  // Busca en Siesa (mismo cia=3 que TAT Agropecuaria) las facturas reales de
-  // las órdenes de Bovino/Porcino cargadas por Excel (su numeroOrden sin la
-  // letra B/P), y les completa cufe/qr/firma digital/nit/valor. Busca en un
-  // rango amplio porque la fecha de facturación real puede ser distinta a la
-  // fecha del pedido en el Excel.
-  async function handleSincronizarAgropecuaria() {
-    setSincronizandoAgro(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const hoy = new Date();
-      const hace90 = new Date(hoy);
-      hace90.setDate(hoy.getDate() - 90);
-      const iso = (d: Date) => d.toISOString().slice(0, 10);
-      const r = await sincronizarAgropecuariaConSiesa(iso(hace90), iso(hoy));
-      setMessage(
-        `Siesa: ${r.facturasEncontradas}/${r.facturasBuscadas} facturas encontradas, ${r.ordenesActualizadas} línea(s) actualizadas.` +
-          (r.sinFactura.length ? ` Sin factura en Siesa: ${r.sinFactura.slice(0, 10).join(", ")}${r.sinFactura.length > 10 ? "…" : ""}.` : "")
-      );
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo sincronizar con Siesa");
-    } finally {
-      setSincronizandoAgro(false);
-    }
   }
 
   async function handleDelete(tipo?: "B" | "P" | "I" | "AGRO" | "TAT" | "TATAGRO" | "TATINV") {
@@ -937,25 +927,14 @@ export default function OrdenesPage() {
                     <span className="hidden sm:inline">Leer factura</span>
                   </button>
                 ) : (
-                  <>
-                    <button
-                      onClick={handleSincronizarAgropecuaria}
-                      disabled={sincronizandoAgro}
-                      title="Busca en Siesa (por el número de factura real, sin la letra B/P) el cufe, QR, firma digital, NIT y valor de estas órdenes"
-                      className={btn}
-                    >
-                      {sincronizandoAgro ? <IconSpin /> : <IconScan />}
-                      <span className="hidden sm:inline">{sincronizandoAgro ? "Sincronizando…" : "Sincronizar con Siesa"}</span>
-                    </button>
-                    <button
-                      onClick={() => activeCat.tipo && triggerImport(activeCat.tipo)}
-                      disabled={importing}
-                      className={btn}
-                    >
-                      {importing ? <IconSpin /> : <IconUpload />}
-                      <span className="hidden sm:inline">{importing ? "Importando…" : "Importar"}</span>
-                    </button>
-                  </>
+                  <button
+                    onClick={() => activeCat.tipo && triggerImport(activeCat.tipo)}
+                    disabled={importing}
+                    className={btn}
+                  >
+                    {importing ? <IconSpin /> : <IconUpload />}
+                    <span className="hidden sm:inline">{importing ? "Importando…" : "Importar"}</span>
+                  </button>
                 ))}
                 <button
                   onClick={closeCategory}
