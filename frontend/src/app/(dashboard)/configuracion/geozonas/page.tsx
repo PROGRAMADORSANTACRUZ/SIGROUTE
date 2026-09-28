@@ -11,6 +11,7 @@ import {
   type PuntoLatLng,
 } from "@/lib/api";
 import { loadGoogleMaps } from "@/lib/googleMaps";
+import { areaAproxKm2, circuloAPoligono, distanciaMetros, rectanguloDeEsquinas } from "@/lib/geoDrawing";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
 
@@ -20,6 +21,20 @@ const CENTRO_INICIAL = { lat: 10.75, lng: -74.9 };
 const ZOOM_INICIAL = 9;
 
 const COLORES_SUGERIDOS = ["#2f8f4e", "#2f6f9f", "#b8860b", "#8f2f6b", "#a03a3a", "#3f6b5a", "#6b5fa0", "#c0742f"];
+
+type ModoDibujo = "poligono" | "rectangulo" | "circulo" | "libre";
+
+const HERRAMIENTAS: { modo: ModoDibujo; label: string; hint: string }[] = [
+  { modo: "poligono", label: "Polígono", hint: "Clic para marcar cada punto; clic en el primer punto (verde) para cerrar la figura" },
+  { modo: "rectangulo", label: "Rectángulo", hint: "Arrastra de una esquina a la opuesta" },
+  { modo: "circulo", label: "Círculo", hint: "Arrastra desde el centro hacia afuera" },
+  { modo: "libre", label: "Mano alzada", hint: "Arrastra para dibujar el contorno libremente" },
+];
+
+// Texto "≈ X m²/km²" legible según el tamaño del área.
+function fmtArea(km2: number): string {
+  return km2 < 1 ? `≈ ${Math.round(km2 * 1_000_000).toLocaleString("es-CO")} m²` : `≈ ${km2.toFixed(2)} km²`;
+}
 
 function anilloCerrado(path: google.maps.MVCArray<google.maps.LatLng>): PuntoLatLng[] {
   const puntos: PuntoLatLng[] = [];
@@ -33,13 +48,28 @@ export default function GeozonasPage() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const overlaysRef = useRef<Map<string, google.maps.Polygon>>(new Map());
   const pendingOverlayRef = useRef<google.maps.Polygon | null>(null);
-  // Google descontinuó el DrawingManager de la Maps JS API (v3.65+), así que
-  // el polígono se dibuja "a mano": cada clic en el mapa agrega un punto; un
-  // botón "Finalizar" cierra la figura. dibujandoRef existe porque el
-  // listener de clic se registra una sola vez y necesita leer el estado más
-  // reciente sin re-suscribirse en cada render.
-  const dibujandoRef = useRef(false);
+
+  // Herramienta de dibujo activa. Se necesita también en un ref porque los
+  // listeners del mapa se registran UNA sola vez (useEffect []) y deben leer
+  // siempre el valor más reciente sin volver a suscribirse en cada render.
+  const modoRef = useRef<ModoDibujo | null>(null);
   const puntosDibujoRef = useRef<google.maps.LatLng[]>([]);
+  // Puntos (círculos blancos) que marcan cada vértice YA colocado, para que
+  // se vea con claridad dónde quedó cada clic — el primero se resalta en
+  // verde y es clicable para cerrar la figura sin necesitar el botón.
+  const verticeMarkersRef = useRef<google.maps.Marker[]>([]);
+  // "Línea de goma": del último punto colocado hasta el cursor (se mueve con
+  // el mouse antes de fijar el siguiente punto) + una línea de cierre punteada
+  // (cursor -> primer punto) para previsualizar cómo quedaría la figura.
+  const lineaGomaRef = useRef<google.maps.Polyline | null>(null);
+  const lineaCierreRef = useRef<google.maps.Polyline | null>(null);
+  // Arrastre (rectángulo/círculo/mano alzada): punto donde empezó el drag +
+  // overlay de previsualización en vivo mientras se arrastra.
+  const arrastrandoRef = useRef(false);
+  const inicioArrastreRef = useRef<google.maps.LatLng | null>(null);
+  const previewRectRef = useRef<google.maps.Rectangle | null>(null);
+  const previewCircleRef = useRef<google.maps.Circle | null>(null);
+  const ultimaMuestraLibreRef = useRef(0);
 
   const [cargandoMapa, setCargandoMapa] = useState(true);
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
@@ -48,15 +78,16 @@ export default function GeozonasPage() {
   const [guardando, setGuardando] = useState(false);
   const [recalculando, setRecalculando] = useState(false);
   const [resultadoRecalculo, setResultadoRecalculo] = useState<string | null>(null);
-  const [dibujando, setDibujando] = useState(false);
+  const [modoDibujo, setModoDibujo] = useState<ModoDibujo | null>(null);
   const [puntosCount, setPuntosCount] = useState(0);
+  const [areaEnCurso, setAreaEnCurso] = useState<number | null>(null);
 
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [formNombre, setFormNombre] = useState("");
   const [formCiudad, setFormCiudad] = useState("");
   const [formColor, setFormColor] = useState(COLORES_SUGERIDOS[0]);
 
-  const [nuevaZona, setNuevaZona] = useState<{ nombre: string; ciudad: string; color: string } | null>(null);
+  const [nuevaZona, setNuevaZona] = useState<{ nombre: string; ciudad: string; color: string; areaKm2: number } | null>(null);
 
   const cargarZonas = useCallback(() => {
     getGeoZonas()
@@ -71,13 +102,157 @@ export default function GeozonasPage() {
     cargarZonas();
   }, [cargarZonas]);
 
-  // Inicializa el mapa una sola vez (con su listener de clic para dibujar).
+  // Quita marcadores de vértice + líneas de ayuda + previews de arrastre del
+  // mapa (NO toca pendingOverlayRef, que sigue vivo tras finalizar la figura).
+  function limpiarAyudasDibujo() {
+    for (const m of verticeMarkersRef.current) m.setMap(null);
+    verticeMarkersRef.current = [];
+    lineaGomaRef.current?.setMap(null);
+    lineaGomaRef.current = null;
+    lineaCierreRef.current?.setMap(null);
+    lineaCierreRef.current = null;
+    previewRectRef.current?.setMap(null);
+    previewRectRef.current = null;
+    previewCircleRef.current?.setMap(null);
+    previewCircleRef.current = null;
+  }
+
+  function agregarMarcadorVertice(punto: google.maps.LatLng, esPrimero: boolean) {
+    const marker = new google.maps.Marker({
+      position: punto,
+      map: mapRef.current!,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: esPrimero ? 7 : 5,
+        fillColor: esPrimero ? "#2f8f4e" : "#ffffff",
+        fillOpacity: 1,
+        strokeColor: "#14352a",
+        strokeWeight: 2,
+      },
+      cursor: esPrimero ? "pointer" : "default",
+      title: esPrimero ? "Clic aquí para cerrar la figura" : undefined,
+      zIndex: 1000,
+    });
+    if (esPrimero) {
+      marker.addListener("click", () => {
+        if (puntosDibujoRef.current.length >= 3) finalizarPoligonoOMano();
+      });
+    }
+    verticeMarkersRef.current.push(marker);
+  }
+
+  // Crea o actualiza el polígono "en construcción" (polígono por clics o
+  // mano alzada) y refresca el contador de puntos + área aproximada en vivo.
+  function actualizarPoligonoEnCurso(puntos: google.maps.LatLng[]) {
+    let preview = pendingOverlayRef.current;
+    if (!preview) {
+      preview = new google.maps.Polygon({
+        paths: puntos,
+        strokeColor: "#14352a",
+        fillColor: "#14352a",
+        fillOpacity: 0.15,
+        strokeWeight: 2,
+        map: mapRef.current!,
+      });
+      pendingOverlayRef.current = preview;
+    } else {
+      preview.setPath(puntos);
+    }
+    setPuntosCount(puntos.length);
+    setAreaEnCurso(puntos.length >= 3 ? areaAproxKm2(puntos.map((p) => ({ lat: p.lat(), lng: p.lng() }))) : null);
+  }
+
+  function seleccionarHerramienta(modo: ModoDibujo) {
+    if (modoRef.current === modo) {
+      cancelarDibujo();
+      return;
+    }
+    cancelarDibujo();
+    modoRef.current = modo;
+    setModoDibujo(modo);
+    setError(null);
+    // Clic-a-clic (polígono) deja el mapa "arrastrable" (un clic simple sigue
+    // funcionando aunque el mapa se pueda mover); las herramientas de
+    // arrastre necesitan el control total del gesto para dibujar, no para
+    // desplazar el mapa.
+    mapRef.current?.setOptions({ draggable: modo === "poligono", disableDoubleClickZoom: true });
+  }
+
+  function cancelarDibujo() {
+    modoRef.current = null;
+    setModoDibujo(null);
+    arrastrandoRef.current = false;
+    inicioArrastreRef.current = null;
+    puntosDibujoRef.current = [];
+    setPuntosCount(0);
+    setAreaEnCurso(null);
+    limpiarAyudasDibujo();
+    pendingOverlayRef.current?.setMap(null);
+    pendingOverlayRef.current = null;
+    mapRef.current?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+  }
+
+  function deshacerUltimoPunto() {
+    if (puntosDibujoRef.current.length === 0) return;
+    puntosDibujoRef.current = puntosDibujoRef.current.slice(0, -1);
+    verticeMarkersRef.current.pop()?.setMap(null);
+    pendingOverlayRef.current?.setPath(puntosDibujoRef.current);
+    setPuntosCount(puntosDibujoRef.current.length);
+    setAreaEnCurso(
+      puntosDibujoRef.current.length >= 3
+        ? areaAproxKm2(puntosDibujoRef.current.map((p) => ({ lat: p.lat(), lng: p.lng() })))
+        : null
+    );
+  }
+
+  // Cierra el polígono por clics o la figura de mano alzada. `avisar=false`
+  // se usa cuando lo dispara el soltar el mouse en modo libre (si el usuario
+  // apenas hizo clic sin arrastrar, se cancela en silencio en vez de mostrar
+  // un error molesto).
+  function finalizarPoligonoOMano(avisar = true) {
+    if (puntosDibujoRef.current.length < 3) {
+      if (avisar) setError("Marca al menos 3 puntos para formar la figura");
+      else cancelarDibujo();
+      return;
+    }
+    modoRef.current = null;
+    setModoDibujo(null);
+    mapRef.current?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+    limpiarAyudasDibujo();
+    pendingOverlayRef.current?.setEditable(true);
+    const puntos = puntosDibujoRef.current.map((p) => ({ lat: p.lat(), lng: p.lng() }));
+    setNuevaZona({ nombre: "", ciudad: "", color: COLORES_SUGERIDOS[zonas.length % COLORES_SUGERIDOS.length], areaKm2: areaAproxKm2(puntos) });
+  }
+
+  // Cierra un rectángulo/círculo (figuras de un solo gesto de arrastre): crea
+  // el polígono final directo, ya editable, y abre el formulario de nombre.
+  function confirmarFiguraArrastrada(puntos: PuntoLatLng[]) {
+    if (puntos.length < 3) return;
+    modoRef.current = null;
+    setModoDibujo(null);
+    mapRef.current?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+    const overlay = new google.maps.Polygon({
+      paths: puntos,
+      strokeColor: "#14352a",
+      fillColor: "#14352a",
+      fillOpacity: 0.15,
+      strokeWeight: 2,
+      editable: true,
+      map: mapRef.current!,
+    });
+    pendingOverlayRef.current = overlay;
+    setNuevaZona({ nombre: "", ciudad: "", color: COLORES_SUGERIDOS[zonas.length % COLORES_SUGERIDOS.length], areaKm2: areaAproxKm2(puntos) });
+  }
+
+  // Inicializa el mapa una sola vez, con los 4 listeners que cubren las 4
+  // herramientas de dibujo (polígono por clics, rectángulo/círculo/mano
+  // alzada por arrastre) — cada listener solo actúa si `modoRef` coincide.
   useEffect(() => {
     let cancelado = false;
     loadGoogleMaps()
-      .then((g) => {
+      .then(() => {
         if (cancelado || !mapDivRef.current) return;
-        const map = new g.maps.Map(mapDivRef.current, {
+        const map = new google.maps.Map(mapDivRef.current, {
           center: CENTRO_INICIAL,
           zoom: ZOOM_INICIAL,
           mapTypeControl: false,
@@ -87,23 +262,129 @@ export default function GeozonasPage() {
         mapRef.current = map;
 
         map.addListener("click", (e: google.maps.MapMouseEvent) => {
-          if (!dibujandoRef.current || !e.latLng) return;
+          if (modoRef.current !== "poligono" || !e.latLng) return;
+          const esPrimero = puntosDibujoRef.current.length === 0;
           puntosDibujoRef.current = [...puntosDibujoRef.current, e.latLng];
-          let preview = pendingOverlayRef.current;
-          if (!preview) {
-            preview = new g.maps.Polygon({
-              paths: puntosDibujoRef.current,
-              strokeColor: "#14352a",
-              fillColor: "#14352a",
-              fillOpacity: 0.15,
-              strokeWeight: 2,
-              map,
-            });
-            pendingOverlayRef.current = preview;
-          } else {
-            preview.setPath(puntosDibujoRef.current);
+          agregarMarcadorVertice(e.latLng, esPrimero);
+          actualizarPoligonoEnCurso(puntosDibujoRef.current);
+        });
+
+        map.addListener("mousemove", (e: google.maps.MapMouseEvent) => {
+          if (!e.latLng) return;
+
+          // Línea de goma del polígono por clics: del último punto al
+          // cursor, más una línea de cierre punteada (cursor -> 1er punto).
+          if (modoRef.current === "poligono" && puntosDibujoRef.current.length > 0) {
+            const ultimo = puntosDibujoRef.current[puntosDibujoRef.current.length - 1];
+            if (!lineaGomaRef.current) {
+              lineaGomaRef.current = new google.maps.Polyline({
+                path: [ultimo, e.latLng],
+                strokeColor: "#14352a",
+                strokeOpacity: 0.7,
+                strokeWeight: 2,
+                map,
+              });
+            } else {
+              lineaGomaRef.current.setPath([ultimo, e.latLng]);
+            }
+            if (puntosDibujoRef.current.length >= 2) {
+              const primero = puntosDibujoRef.current[0];
+              if (!lineaCierreRef.current) {
+                lineaCierreRef.current = new google.maps.Polyline({
+                  path: [e.latLng, primero],
+                  strokeColor: "#14352a",
+                  strokeOpacity: 0.35,
+                  strokeWeight: 2,
+                  icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 }, offset: "0", repeat: "10px" }],
+                  map,
+                });
+              } else {
+                lineaCierreRef.current.setPath([e.latLng, primero]);
+              }
+            }
           }
-          setPuntosCount(puntosDibujoRef.current.length);
+
+          // Mano alzada: muestrea puntos mientras se arrastra (throttle ~30ms
+          // para no saturar de vértices casi idénticos entre sí).
+          if (modoRef.current === "libre" && arrastrandoRef.current) {
+            const ahora = Date.now();
+            if (ahora - ultimaMuestraLibreRef.current > 30) {
+              ultimaMuestraLibreRef.current = ahora;
+              puntosDibujoRef.current = [...puntosDibujoRef.current, e.latLng];
+              actualizarPoligonoEnCurso(puntosDibujoRef.current);
+            }
+          }
+
+          // Rectángulo/círculo: previsualización en vivo mientras se arrastra.
+          if (arrastrandoRef.current && inicioArrastreRef.current) {
+            const inicio = { lat: inicioArrastreRef.current.lat(), lng: inicioArrastreRef.current.lng() };
+            const actual = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+            if (modoRef.current === "rectangulo") {
+              const bounds = {
+                north: Math.max(inicio.lat, actual.lat),
+                south: Math.min(inicio.lat, actual.lat),
+                east: Math.max(inicio.lng, actual.lng),
+                west: Math.min(inicio.lng, actual.lng),
+              };
+              if (!previewRectRef.current) {
+                previewRectRef.current = new google.maps.Rectangle({
+                  bounds, strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, map,
+                });
+              } else {
+                previewRectRef.current.setBounds(bounds);
+              }
+              setAreaEnCurso(areaAproxKm2(rectanguloDeEsquinas(inicio, actual)));
+            } else if (modoRef.current === "circulo") {
+              const radio = distanciaMetros(inicio, actual);
+              if (!previewCircleRef.current) {
+                previewCircleRef.current = new google.maps.Circle({
+                  center: inicioArrastreRef.current, radius: radio,
+                  strokeColor: "#14352a", fillColor: "#14352a", fillOpacity: 0.15, strokeWeight: 2, map,
+                });
+              } else {
+                previewCircleRef.current.setRadius(radio);
+              }
+              setAreaEnCurso((Math.PI * radio * radio) / 1_000_000);
+            }
+          }
+        });
+
+        map.addListener("mousedown", (e: google.maps.MapMouseEvent) => {
+          if (!e.latLng) return;
+          if (modoRef.current === "rectangulo" || modoRef.current === "circulo") {
+            arrastrandoRef.current = true;
+            inicioArrastreRef.current = e.latLng;
+          } else if (modoRef.current === "libre") {
+            arrastrandoRef.current = true;
+            puntosDibujoRef.current = [e.latLng];
+            ultimaMuestraLibreRef.current = Date.now();
+            agregarMarcadorVertice(e.latLng, true);
+          }
+        });
+
+        map.addListener("mouseup", (e: google.maps.MapMouseEvent) => {
+          if (!arrastrandoRef.current) return;
+          arrastrandoRef.current = false;
+
+          if ((modoRef.current === "rectangulo" || modoRef.current === "circulo") && inicioArrastreRef.current && e.latLng) {
+            const inicio = { lat: inicioArrastreRef.current.lat(), lng: inicioArrastreRef.current.lng() };
+            const actual = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+            previewRectRef.current?.setMap(null);
+            previewRectRef.current = null;
+            previewCircleRef.current?.setMap(null);
+            previewCircleRef.current = null;
+            if (distanciaMetros(inicio, actual) < 3) {
+              // Arrastre insignificante (casi un clic) — no crear nada.
+            } else if (modoRef.current === "rectangulo") {
+              confirmarFiguraArrastrada(rectanguloDeEsquinas(inicio, actual));
+            } else {
+              confirmarFiguraArrastrada(circuloAPoligono(inicio, distanciaMetros(inicio, actual)));
+            }
+            if (modoRef.current) { modoRef.current = null; setModoDibujo(null); mapRef.current?.setOptions({ draggable: true, disableDoubleClickZoom: false }); }
+          } else if (modoRef.current === "libre") {
+            finalizarPoligonoOMano(false);
+          }
+          inicioArrastreRef.current = null;
         });
 
         setCargandoMapa(false);
@@ -118,6 +399,18 @@ export default function GeozonasPage() {
     return () => {
       cancelado = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Atajos de teclado mientras se dibuja: Escape cancela, Enter cierra el
+  // polígono por clics (si ya tiene los 3 puntos mínimos).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && modoRef.current) cancelarDibujo();
+      if (e.key === "Enter" && modoRef.current === "poligono" && puntosDibujoRef.current.length >= 3) finalizarPoligonoOMano();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -157,39 +450,6 @@ export default function GeozonasPage() {
       }
     }
   }, [zonas, editandoId]);
-
-  function iniciarDibujo() {
-    puntosDibujoRef.current = [];
-    setPuntosCount(0);
-    dibujandoRef.current = true;
-    setDibujando(true);
-  }
-
-  function deshacerUltimoPunto() {
-    puntosDibujoRef.current = puntosDibujoRef.current.slice(0, -1);
-    pendingOverlayRef.current?.setPath(puntosDibujoRef.current);
-    setPuntosCount(puntosDibujoRef.current.length);
-  }
-
-  function cancelarDibujo() {
-    dibujandoRef.current = false;
-    setDibujando(false);
-    puntosDibujoRef.current = [];
-    setPuntosCount(0);
-    pendingOverlayRef.current?.setMap(null);
-    pendingOverlayRef.current = null;
-  }
-
-  function finalizarDibujo() {
-    if (puntosDibujoRef.current.length < 3) {
-      setError("Marca al menos 3 puntos en el mapa para formar un polígono");
-      return;
-    }
-    dibujandoRef.current = false;
-    setDibujando(false);
-    pendingOverlayRef.current?.setEditable(true);
-    setNuevaZona({ nombre: "", ciudad: "", color: COLORES_SUGERIDOS[zonas.length % COLORES_SUGERIDOS.length] });
-  }
 
   function cancelarNuevaZona() {
     pendingOverlayRef.current?.setMap(null);
@@ -310,8 +570,8 @@ export default function GeozonasPage() {
             {!puedeEditar && <SoloLecturaBadge />}
           </div>
           <p className="text-sm text-[#5f7a68]">
-            Dibuja los polígonos de cada zona de ciudad; se usan para agrupar clientes/facturas por área en Ejecución y
-            para preasignar rutas automáticamente en Planeación.
+            Dibuja el contorno de cada zona de ciudad (polígono, rectángulo, círculo o mano alzada); se usan para agrupar
+            clientes/facturas por área en Ejecución y para preasignar rutas automáticamente en Planeación.
           </p>
         </div>
         {puedeEditar && (
@@ -325,17 +585,21 @@ export default function GeozonasPage() {
             >
               {recalculando ? "Recalculando…" : "Recalcular áreas"}
             </button>
-            <button
-              onClick={iniciarDibujo}
-              disabled={dibujando || !!nuevaZona}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42] disabled:opacity-50"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Dibujar geozona
-            </button>
+            <div className="flex items-center gap-1 rounded-lg border border-[#dfe4e0] bg-white p-1">
+              {HERRAMIENTAS.map((h) => (
+                <button
+                  key={h.modo}
+                  title={h.hint}
+                  onClick={() => seleccionarHerramienta(h.modo)}
+                  disabled={!!nuevaZona}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${
+                    modoDibujo === h.modo ? "bg-[#2f8f4e] text-white" : "text-[#45505e] hover:bg-[#f0f2ee]"
+                  }`}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </header>
@@ -354,34 +618,48 @@ export default function GeozonasPage() {
           )}
           <div ref={mapDivRef} className="h-full w-full" />
 
-          {dibujando && (
-            <div className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#e1e9dd] bg-white px-4 py-2 shadow-lg">
+          {modoDibujo && (
+            <div className="absolute left-1/2 top-4 z-10 flex max-w-[90%] -translate-x-1/2 flex-wrap items-center gap-3 rounded-full border border-[#e1e9dd] bg-white px-4 py-2 shadow-lg">
               <span className="text-sm text-[#14352a]">
-                Haz clic en el mapa para marcar los puntos del polígono ({puntosCount} punto{puntosCount === 1 ? "" : "s"})
+                {HERRAMIENTAS.find((h) => h.modo === modoDibujo)?.hint}
+                {modoDibujo === "poligono" && ` · ${puntosCount} punto${puntosCount === 1 ? "" : "s"}`}
               </span>
-              <button
-                onClick={deshacerUltimoPunto}
-                disabled={puntosCount === 0}
-                className="rounded-lg px-2.5 py-1 text-xs text-[#5f7a68] hover:bg-[#f4f6f3] disabled:opacity-40"
-              >
-                Deshacer punto
-              </button>
+              {areaEnCurso != null && (
+                <span className="rounded-full bg-[#f0f2ee] px-2 py-0.5 text-xs font-medium text-[#45505e]">{fmtArea(areaEnCurso)}</span>
+              )}
+              {modoDibujo === "poligono" && (
+                <button
+                  onClick={deshacerUltimoPunto}
+                  disabled={puntosCount === 0}
+                  className="rounded-lg px-2.5 py-1 text-xs text-[#5f7a68] hover:bg-[#f4f6f3] disabled:opacity-40"
+                >
+                  Deshacer punto
+                </button>
+              )}
               <button onClick={cancelarDibujo} className="rounded-lg px-2.5 py-1 text-xs text-[#b3261e] hover:bg-[#fdecea]">
-                Cancelar
+                Cancelar (Esc)
               </button>
-              <button
-                onClick={finalizarDibujo}
-                disabled={puntosCount < 3}
-                className="rounded-lg bg-[#2f8f4e] px-3 py-1 text-xs font-medium text-white hover:bg-[#277a42] disabled:opacity-40"
-              >
-                Finalizar
-              </button>
+              {modoDibujo === "poligono" && (
+                <button
+                  onClick={() => finalizarPoligonoOMano()}
+                  disabled={puntosCount < 3}
+                  className="rounded-lg bg-[#2f8f4e] px-3 py-1 text-xs font-medium text-white hover:bg-[#277a42] disabled:opacity-40"
+                >
+                  Finalizar (Enter)
+                </button>
+              )}
             </div>
           )}
 
           {nuevaZona && (
             <div className="absolute bottom-4 left-4 z-10 w-72 rounded-xl border border-[#e1e9dd] bg-white p-4 shadow-lg">
-              <p className="mb-2 text-sm font-semibold text-[#14352a]">Nueva geozona</p>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-[#14352a]">Nueva geozona</p>
+                <span className="shrink-0 rounded-full bg-[#f0f2ee] px-2 py-0.5 text-xs font-medium text-[#45505e]">
+                  {fmtArea(nuevaZona.areaKm2)}
+                </span>
+              </div>
+              <p className="mb-2 text-xs text-[#7a8794]">Puedes arrastrar los vértices en el mapa para ajustar la figura antes de guardar.</p>
               <input
                 autoFocus
                 value={nuevaZona.nombre}
@@ -435,7 +713,10 @@ export default function GeozonasPage() {
                       <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: z.color }} />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-[#14352a]">{z.nombre}</p>
-                        {z.ciudad && <p className="truncate text-xs text-[#7a8794]">{z.ciudad}</p>}
+                        <p className="truncate text-xs text-[#7a8794]">
+                          {z.ciudad ? `${z.ciudad} · ` : ""}
+                          {fmtArea(areaAproxKm2(z.poligono))} · {z.poligono.length} puntos
+                        </p>
                       </div>
                     </div>
                     {puedeEditar && !enEdicion && (
