@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ApiError, loginWithSsoTicket } from "@/lib/api";
 
 export default function SsoCallbackPage() {
+  return (
+    <Suspense fallback={<SsoCallbackLoadingCard />}>
+      <SsoCallbackContent />
+    </Suspense>
+  );
+}
+
+function SsoCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +46,22 @@ export default function SsoCallbackPage() {
   }, [router, searchParams]);
 
   return (
+    <SsoCallbackCard error={error} onGoLogin={() => router.replace("/login")} />
+  );
+}
+
+function SsoCallbackLoadingCard() {
+  return <SsoCallbackCard error={null} onGoLogin={() => {}} />;
+}
+
+function SsoCallbackCard({
+  error,
+  onGoLogin,
+}: {
+  error: string | null;
+  onGoLogin: () => void;
+}) {
+  return (
     <main className="flex min-h-screen items-center justify-center bg-[#f7faf5] px-6">
       <div className="w-full max-w-md rounded-2xl border border-[#dfe4e0] bg-white p-6 shadow-sm">
         <h1 className="text-lg font-bold text-[#14352a]">Acceso desde Suite Santacruz</h1>
@@ -53,7 +77,7 @@ export default function SsoCallbackPage() {
             </p>
             <button
               type="button"
-              onClick={() => router.replace("/login")}
+              onClick={onGoLogin}
               className="mt-4 rounded-lg bg-[#2f8f4e] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#277a42]"
             >
               Ir a iniciar sesión
