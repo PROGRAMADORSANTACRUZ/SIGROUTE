@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getGeoZonas,
   crearGeoZona,
@@ -37,6 +37,8 @@ const HERRAMIENTAS: { modo: ModoDibujo; label: string; hint: string }[] = [
 function fmtArea(km2: number): string {
   return km2 < 1 ? `≈ ${Math.round(km2 * 1_000_000).toLocaleString("es-CO")} m²` : `≈ ${km2.toFixed(2)} km²`;
 }
+
+const fmtMoney = (n: number) => n.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 
 // Pin de cliente: un pin chico (no el marcador rojo gigante por defecto de
 // Google) — sin agrupación, cada cliente muestra su propio pin siempre. Un
@@ -133,6 +135,15 @@ export default function GeozonasPage() {
   const [mostrarClientes, setMostrarClientes] = useState(false);
   const [clientesMapa, setClientesMapa] = useState<ClienteMapa[] | null>(null);
   const [cargandoClientes, setCargandoClientes] = useState(false);
+  // Filtros del mapa de clientes (todos client-side, sobre lo ya cargado en
+  // clientesMapa — sin ir al backend por cada cambio de filtro). "Ciudad"
+  // aquí es Cliente.comuna, el dato real de ciudad del maestro; no tiene que
+  // ver con las Geozonas dibujadas (eso es un agrupamiento aparte).
+  const [filtroTexto, setFiltroTexto] = useState("");
+  const [filtroCiudad, setFiltroCiudad] = useState("");
+  const [filtroClasificacion, setFiltroClasificacion] = useState<"" | "TAT" | "Distribución">("");
+  const [filtroVendedor, setFiltroVendedor] = useState("");
+  const [filtroCompras, setFiltroCompras] = useState<"" | "con-compras" | "top50" | "top100" | "top300">("");
 
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [formNombre, setFormNombre] = useState("");
@@ -542,6 +553,43 @@ export default function GeozonasPage() {
       .finally(() => setCargandoClientes(false));
   }, [mostrarClientes, clientesMapa]);
 
+  // Opciones de los desplegables de filtro, sacadas de los datos ya
+  // cargados (sin pedirle nada nuevo al backend).
+  const ciudadesDisponibles = useMemo(() => {
+    if (!clientesMapa) return [];
+    return Array.from(new Set(clientesMapa.map((c) => c.ciudad).filter((c): c is string => !!c))).sort((a, b) =>
+      a.localeCompare(b, "es")
+    );
+  }, [clientesMapa]);
+  const vendedoresDisponibles = useMemo(() => {
+    if (!clientesMapa) return [];
+    return Array.from(new Set(clientesMapa.map((c) => c.vendedor).filter((v): v is string => !!v))).sort((a, b) =>
+      a.localeCompare(b, "es")
+    );
+  }, [clientesMapa]);
+
+  // Todos los filtros son client-side: ya está toda la lista cargada en
+  // memoria, filtrar de nuevo por cada cambio de un <select> no le pega al
+  // backend ni recarga nada.
+  const clientesFiltrados = useMemo(() => {
+    if (!clientesMapa) return null;
+    let lista = clientesMapa;
+    if (filtroTexto.trim()) {
+      const q = filtroTexto.trim().toLowerCase();
+      lista = lista.filter((c) => c.nombre.toLowerCase().includes(q));
+    }
+    if (filtroCiudad) lista = lista.filter((c) => c.ciudad === filtroCiudad);
+    if (filtroClasificacion) lista = lista.filter((c) => c.clasificacion === filtroClasificacion);
+    if (filtroVendedor) lista = lista.filter((c) => c.vendedor === filtroVendedor);
+    if (filtroCompras === "con-compras") {
+      lista = lista.filter((c) => c.totalComprado > 0);
+    } else if (filtroCompras === "top50" || filtroCompras === "top100" || filtroCompras === "top300") {
+      const n = filtroCompras === "top50" ? 50 : filtroCompras === "top100" ? 100 : 300;
+      lista = [...lista].sort((a, b) => b.totalComprado - a.totalComprado).slice(0, n);
+    }
+    return lista;
+  }, [clientesMapa, filtroTexto, filtroCiudad, filtroClasificacion, filtroVendedor, filtroCompras]);
+
   // Pinta/quita los pines de clientes según el switch. Un solo InfoWindow
   // compartido se abre en "mouseover" (mini-modal con la info del cliente,
   // anclado justo encima del pin) y se cierra en "mouseout". Sin
@@ -565,7 +613,7 @@ export default function GeozonasPage() {
       clienteMarkersRef.current = [];
     }
 
-    if (!mostrarClientes || !clientesMapa) {
+    if (!mostrarClientes || !clientesFiltrados) {
       limpiarMarcadores();
       infoWindowRef.current?.close();
       return;
@@ -578,7 +626,7 @@ export default function GeozonasPage() {
 
     limpiarMarcadores();
     const icono = iconoPinCliente();
-    clienteMarkersRef.current = clientesMapa.map((c) => {
+    clienteMarkersRef.current = clientesFiltrados.map((c) => {
       const marker = new google.maps.Marker({
         position: { lat: c.lat, lng: c.lon },
         icon: icono,
@@ -595,6 +643,8 @@ export default function GeozonasPage() {
             `<strong style="color:#14352a">${escapeHtml(c.nombre)}</strong>` +
             (c.direccion ? `<br/><span style="color:#5f7a68">${escapeHtml(c.direccion)}</span>` : "") +
             (c.telefono ? `<br/><span style="color:#5f7a68">Tel: ${escapeHtml(c.telefono)}</span>` : "") +
+            `<br/><span style="color:#5f7a68">${escapeHtml(c.clasificacion)}${c.ciudad ? ` · ${escapeHtml(c.ciudad)}` : ""}</span>` +
+            (c.totalComprado > 0 ? `<br/><span style="color:#2f8f4e;font-weight:600">${escapeHtml(fmtMoney(c.totalComprado))} comprados</span>` : "") +
             (zona ? `<br/><span style="color:${zona.color};font-weight:600">Geozona: ${escapeHtml(zona.nombre)}</span>` : "") +
             `</div>`
         );
@@ -608,7 +658,7 @@ export default function GeozonasPage() {
     // que soltar los marcadores explícitamente: Google Maps no los libera
     // solo porque el componente de React se desmonte.
     return () => limpiarMarcadores();
-  }, [mostrarClientes, clientesMapa]);
+  }, [mostrarClientes, clientesFiltrados]);
 
 
   function cancelarNuevaZona() {
@@ -797,6 +847,79 @@ export default function GeozonasPage() {
           </div>
         )}
       </header>
+
+      {mostrarClientes && clientesMapa && (
+        <div className="mb-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-[#e1e9dd] bg-white p-2.5">
+          <input
+            type="text"
+            value={filtroTexto}
+            onChange={(e) => setFiltroTexto(e.target.value)}
+            placeholder="Buscar cliente por nombre…"
+            className="w-48 rounded-lg border border-[#dfe4e0] px-2.5 py-1.5 text-sm text-[#14352a] placeholder:text-[#9ba9a1] focus:border-[#2f8f4e] focus:outline-none"
+          />
+          <select
+            value={filtroCiudad}
+            onChange={(e) => setFiltroCiudad(e.target.value)}
+            className="rounded-lg border border-[#dfe4e0] px-2.5 py-1.5 text-sm text-[#45505e] focus:border-[#2f8f4e] focus:outline-none"
+          >
+            <option value="">Todas las ciudades</option>
+            {ciudadesDisponibles.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filtroClasificacion}
+            onChange={(e) => setFiltroClasificacion(e.target.value as typeof filtroClasificacion)}
+            className="rounded-lg border border-[#dfe4e0] px-2.5 py-1.5 text-sm text-[#45505e] focus:border-[#2f8f4e] focus:outline-none"
+          >
+            <option value="">Distribución y TAT</option>
+            <option value="Distribución">Solo Distribución</option>
+            <option value="TAT">Solo TAT</option>
+          </select>
+          <select
+            value={filtroVendedor}
+            onChange={(e) => setFiltroVendedor(e.target.value)}
+            className="rounded-lg border border-[#dfe4e0] px-2.5 py-1.5 text-sm text-[#45505e] focus:border-[#2f8f4e] focus:outline-none"
+          >
+            <option value="">Todos los vendedores</option>
+            {vendedoresDisponibles.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filtroCompras}
+            onChange={(e) => setFiltroCompras(e.target.value as typeof filtroCompras)}
+            className="rounded-lg border border-[#dfe4e0] px-2.5 py-1.5 text-sm text-[#45505e] focus:border-[#2f8f4e] focus:outline-none"
+          >
+            <option value="">Todos (sin ordenar por compras)</option>
+            <option value="con-compras">Solo con compras registradas</option>
+            <option value="top50">Top 50 que más compran</option>
+            <option value="top100">Top 100 que más compran</option>
+            <option value="top300">Top 300 que más compran</option>
+          </select>
+          {(filtroTexto || filtroCiudad || filtroClasificacion || filtroVendedor || filtroCompras) && (
+            <button
+              onClick={() => {
+                setFiltroTexto("");
+                setFiltroCiudad("");
+                setFiltroClasificacion("");
+                setFiltroVendedor("");
+                setFiltroCompras("");
+              }}
+              className="rounded-lg px-2.5 py-1.5 text-sm text-[#8a5a2f] hover:bg-[#f4f6f3]"
+            >
+              Limpiar filtros
+            </button>
+          )}
+          <span className="ml-auto text-xs text-[#5f7a68]">
+            {clientesFiltrados?.length ?? 0} de {clientesMapa.length} clientes
+          </span>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-[#e1e9dd] bg-white shadow-sm">

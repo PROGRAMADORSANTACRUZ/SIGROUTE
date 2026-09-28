@@ -222,31 +222,68 @@ router.get("/geozonas", requireAuth, async (_req, res, next) => {
   }
 });
 
-// Puntos livianos (solo lo que hace falta para un pin + tooltip en el mapa)
-// de todos los clientes con geoposición — separado de GET /api/clientes
+// Puntos livianos (solo lo que hace falta para un pin + tooltip + filtros en
+// el mapa) de todos los clientes con geoposición — separado de GET /api/clientes
 // (que trae el registro completo, mucho más pesado) para no cargar de más
 // cuando solo se necesita pintar el mapa de Geozonas.
 router.get("/geozonas/clientes-mapa", requireAuth, async (_req, res, next) => {
   try {
-    const clientes = await prisma.cliente.findMany({
-      where: { activo: true, lat: { not: null }, lon: { not: null } },
-      select: { id: true, cliente: true, nombreDireccion: true, direccion: true, telefono: true, lat: true, lon: true },
-    });
+    const [clientes, totalesPorClienteId, totalesPorCodigo] = await Promise.all([
+      prisma.cliente.findMany({
+        where: { activo: true, lat: { not: null }, lon: { not: null } },
+        select: {
+          id: true,
+          cliente: true,
+          nombreDireccion: true,
+          direccion: true,
+          telefono: true,
+          lat: true,
+          lon: true,
+          comuna: true,
+          tipo: true,
+          vendedor: true,
+          codigoDireccion: true,
+        },
+      }),
+      // Distribución (Bovino/Porcino): Orden.clienteSistemaId sí queda
+      // poblado al importar, se puede sumar directo por id.
+      prisma.orden.groupBy({ by: ["clienteSistemaId"], where: { clienteSistemaId: { not: null } }, _sum: { valor: true } }),
+      // TAT: clienteSistemaId nunca se llena al importar (bug ya conocido,
+      // ver Asignación de órdenes); se suma por Orden.codigo, que para TAT es
+      // el NIT-sucursal = Cliente.codigoDireccion.
+      prisma.orden.groupBy({ by: ["codigo"], where: { codigo: { not: null } }, _sum: { valor: true } }),
+    ]);
+    const totalPorClienteId = new Map(totalesPorClienteId.map((t) => [t.clienteSistemaId as string, t._sum.valor ?? 0]));
+    const totalPorCodigo = new Map(totalesPorCodigo.map((t) => [t.codigo as string, t._sum.valor ?? 0]));
+
     const puntos = clientes
-      .map((c) => ({
-        id: c.id,
-        nombre: c.cliente || c.nombreDireccion || "(sin nombre)",
-        direccion: c.direccion,
-        telefono: c.telefono,
-        lat: parseFloat(c.lat ?? ""),
-        lon: parseFloat(c.lon ?? ""),
-      }))
+      .map((c) => {
+        const esTat = c.tipo === "TAT";
+        // Suma aproximada: distribución por Cliente.id, TAT por código
+        // (NIT-sucursal). No reproduce el enrutamiento por NIT concatenado
+        // que sí usa Asignación de órdenes -- alcanza para ordenar/filtrar
+        // "quién compra más" en el mapa, no es un reporte contable.
+        const totalComprado = (totalPorClienteId.get(c.id) ?? 0) + (esTat && c.codigoDireccion ? totalPorCodigo.get(c.codigoDireccion) ?? 0 : 0);
+        return {
+          id: c.id,
+          nombre: c.cliente || c.nombreDireccion || "(sin nombre)",
+          direccion: c.direccion,
+          telefono: c.telefono,
+          lat: parseFloat(c.lat ?? ""),
+          lon: parseFloat(c.lon ?? ""),
+          ciudad: c.comuna || null,
+          clasificacion: esTat ? ("TAT" as const) : ("Distribución" as const),
+          vendedor: c.vendedor || null,
+          totalComprado,
+        };
+      })
       .filter((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon));
     res.json(puntos);
   } catch (err) {
     next(err);
   }
 });
+
 
 router.post("/geozonas", requireAuth, requirePermiso("config.geozonas.editar"), async (req, res, next) => {
   try {

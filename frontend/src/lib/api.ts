@@ -1223,6 +1223,10 @@ export interface ClienteMapa {
   telefono: string | null;
   lat: number;
   lon: number;
+  ciudad: string | null;
+  clasificacion: "TAT" | "Distribución";
+  vendedor: string | null;
+  totalComprado: number;
 }
 
 export function getClientesMapa(): Promise<ClienteMapa[]> {
