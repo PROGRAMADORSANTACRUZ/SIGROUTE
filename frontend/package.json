@@ -10,7 +10,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@googlemaps/markerclusterer": "^2.6.2",
     "@types/leaflet": "^1.9.22",
     "html5-qrcode": "^2.3.8",
     "jsqr": "^1.4.0",
