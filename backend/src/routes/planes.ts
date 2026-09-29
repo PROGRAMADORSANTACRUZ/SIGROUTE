@@ -85,6 +85,21 @@ function esConcatNit(k: string): boolean {
   return /^\d{5,}(?:-\d+)?$/.test(k);
 }
 
+// Snapshot de una "orden" (grupo por numeroOrden) tal como se mandó a Drivin,
+// para poblar EnvioDrivin/EnvioDrivinFactura después del POST (ver planes.ts
+// abajo) -- independiente de Orden, que se archiva/limpia a diario.
+type FacturaParaHistorial = {
+  ordenIds: string[];
+  numeroOrden: string;
+  cliente: string;
+  destino: string;
+  placa: string | null;
+  cantidadKg: number;
+  valor: number;
+  distribucion: string;
+  fecha: string | null;
+};
+
 // Construye el payload del escenario a partir de las órdenes asignadas en BD.
 export async function buildScenarioPayload(opts: {
   descripcion: string;
@@ -239,6 +254,7 @@ export async function buildScenarioPayload(opts: {
   }
 
   const clients = [];
+  const facturasParaHistorial: FacturaParaHistorial[] = [];
   // Direcciones cuyas órdenes quedaron repartidas en más de un vehículo (Drivin
   // solo puede visitar la parada con uno -> el resto iría con otro conductor).
   const conflictosVehiculo: { cliente: string; destino: string; vehiculos: string[] }[] = [];
@@ -330,6 +346,17 @@ export async function buildScenarioPayload(opts: {
         items,
       });
       if (lineas[0].asignadoVehiculo) vehiculosCliente.add(lineas[0].asignadoVehiculo);
+      facturasParaHistorial.push({
+        ordenIds: lineas.map((l) => l.id),
+        numeroOrden,
+        cliente: clienteGS,
+        destino,
+        placa: lineas[0].asignadoVehiculo,
+        cantidadKg: totalKg,
+        valor: totalValor,
+        distribucion: distribLabel,
+        fecha: lineas[0].fecha ?? null,
+      });
     }
     // Info final a Drivin: primero la del cliente al que se concatenó; si no, la propia.
     const nombreFinal = asignado?.nombre ?? clienteGS;
@@ -387,6 +414,7 @@ export async function buildScenarioPayload(opts: {
     vehicles: vehiculos,
     _ordenesCount: ordenes.length,
     _conflictosVehiculo: conflictosVehiculo,
+    _facturasParaHistorial: facturasParaHistorial,
   };
 }
 
@@ -399,6 +427,65 @@ async function incrementarReplicas(placas: string[]): Promise<void> {
       create: { placa, veces: 1 },
       update: { veces: { increment: 1 } },
     });
+  }
+}
+
+// Historial DURABLE de un intento de envío a Drivin (éxito o error) — a
+// diferencia de EnvioReplica/Orden, esto nunca se borra en la limpieza diaria.
+// En éxito, además marca cada Orden incluida con envioDrivinId/enviadoDrivinEn
+// (esas SÍ se consideran "ejecutadas" para reportes; lo cargado pero nunca
+// enviado no cuenta).
+async function registrarEnvioDrivin(opts: {
+  tipo: "crear" | "agregar";
+  scenarioToken?: string | null;
+  scenarioDescripcion?: string | null;
+  fleetName?: string | null;
+  schemaName?: string | null;
+  facturas: FacturaParaHistorial[];
+  exitoso: boolean;
+  httpStatus?: number | null;
+  errorMensaje?: string | null;
+}): Promise<void> {
+  const placas = [...new Set(opts.facturas.map((f) => f.placa).filter((p): p is string => !!p))];
+  const totalKg = opts.facturas.reduce((s, f) => s + f.cantidadKg, 0);
+  const totalValor = opts.facturas.reduce((s, f) => s + f.valor, 0);
+  const envio = await prisma.envioDrivin.create({
+    data: {
+      tipo: opts.tipo,
+      scenarioToken: opts.scenarioToken ?? null,
+      scenarioDescripcion: opts.scenarioDescripcion ?? null,
+      fleetName: opts.fleetName ?? null,
+      schemaName: opts.schemaName ?? null,
+      placas: placas.join(","),
+      totalFacturas: opts.facturas.length,
+      totalKg,
+      totalValor,
+      exitoso: opts.exitoso,
+      httpStatus: opts.httpStatus ?? null,
+      errorMensaje: opts.errorMensaje ?? null,
+      facturas: {
+        create: opts.facturas.map((f) => ({
+          ordenId: f.ordenIds[0] ?? null,
+          numeroOrden: f.numeroOrden,
+          cliente: f.cliente,
+          destino: f.destino,
+          placa: f.placa,
+          cantidadKg: f.cantidadKg,
+          valor: f.valor,
+          distribucion: f.distribucion,
+          fecha: f.fecha,
+        })),
+      },
+    },
+  });
+  if (opts.exitoso) {
+    const todosIds = opts.facturas.flatMap((f) => f.ordenIds);
+    if (todosIds.length > 0) {
+      await prisma.orden.updateMany({
+        where: { id: { in: todosIds } },
+        data: { envioDrivinId: envio.id, enviadoDrivinEn: new Date() },
+      });
+    }
   }
 }
 
@@ -519,9 +606,31 @@ router.post("/", requirePermiso("distrilog.planes.editar"), async (req, res, nex
       string,
       unknown
     >;
+    const facturas = payload._facturasParaHistorial;
     if (!resp.ok) {
+      await registrarEnvioDrivin({
+        tipo: "crear",
+        scenarioDescripcion: descripcion,
+        fleetName,
+        schemaName,
+        facturas,
+        exitoso: false,
+        httpStatus: resp.status,
+        errorMensaje: drivinErrorMessage(resp.status, result),
+      });
       throw new HttpError(resp.status >= 500 ? 502 : 400, drivinErrorMessage(resp.status, result));
     }
+
+    const scenarioToken = ((result?.response as Record<string, unknown> | undefined)?.token as string | undefined) ?? null;
+    await registrarEnvioDrivin({
+      tipo: "crear",
+      scenarioToken,
+      scenarioDescripcion: descripcion,
+      fleetName,
+      schemaName,
+      facturas,
+      exitoso: true,
+    });
 
     // Marca solo las órdenes enviadas (respetando filtro de placas si aplica)
     const updateWhere: Record<string, unknown> = {
@@ -651,6 +760,13 @@ router.post("/agregar", requirePermiso("distrilog.planes.editar"), async (req, r
       });
     }
 
+    // Solo las facturas que realmente van en este POST (sin duplicados) —
+    // tanto para el historial (EnvioDrivin) como para marcar "Enviado" abajo,
+    // en vez de marcar TODAS las elegibles asignadas (bug real: antes se
+    // marcaban órdenes que no formaron parte de este envío).
+    const numerosEnviados = new Set(clientesFiltrados.flatMap((c) => c.orders.map((o: { code: string }) => o.code)));
+    const facturasFiltradas = payload._facturasParaHistorial.filter((f) => numerosEnviados.has(f.numeroOrden));
+
     // 5. Agregar las órdenes nuevas al escenario existente.
     const addResp = await fetch(
       `${env.DRIVIN_API_URL}/v2/orders?token=${scenarioToken}`,
@@ -663,12 +779,30 @@ router.post("/agregar", requirePermiso("distrilog.planes.editar"), async (req, r
     );
     const addResult = (await addResp.json().catch(() => ({}))) as Record<string, unknown>;
     if (!addResp.ok) {
+      await registrarEnvioDrivin({
+        tipo: "agregar",
+        scenarioToken,
+        scenarioDescripcion: escenario.description,
+        facturas: facturasFiltradas,
+        exitoso: false,
+        httpStatus: addResp.status,
+        errorMensaje: drivinErrorMessage(addResp.status, addResult),
+      });
       throw new HttpError(addResp.status >= 500 ? 502 : 400, drivinErrorMessage(addResp.status, addResult));
     }
+    await registrarEnvioDrivin({
+      tipo: "agregar",
+      scenarioToken,
+      scenarioDescripcion: escenario.description,
+      facturas: facturasFiltradas,
+      exitoso: true,
+    });
 
-    // 6. Marcar las órdenes enviadas en la BD.
+    // 6. Marcar como "Enviado" SOLO las órdenes que realmente se mandaron en
+    // este POST (no todas las elegibles asignadas).
     await prisma.orden.updateMany({
       where: {
+        numeroOrden: { in: [...numerosEnviados] },
         asignadoVehiculo: { not: null },
         estado: { notIn: ESTADOS_NO_ENVIABLES },
       },

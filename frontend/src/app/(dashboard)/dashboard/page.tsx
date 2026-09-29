@@ -14,7 +14,7 @@ import {
   type Planilla,
   type VehiculoExterno,
 } from "@/lib/api";
-import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, getComparativoClientes, rellenarEjecutado, type ComparativoAdmin, type ComparativoClientes } from "@/lib/planApi";
+import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, getComparativoClientes, rellenarEjecutado, getEnviosDrivinTendencia, type ComparativoAdmin, type ComparativoClientes, type EnviosDrivinTendencia } from "@/lib/planApi";
 import { getErrandsDashboard, type ErrandsDashboard } from "@/lib/errandsApi";
 import { capacidadEfectiva } from "@/lib/utils";
 import { PageLoader } from "@/components/Loading";
@@ -307,6 +307,24 @@ function DashboardPageInner() {
   useEffect(() => {
     if (vista === "comparativo") cargarComparativoClientes();
   }, [vista, cargarComparativoClientes]);
+
+  // ── Histórico real de envíos a Drivin (últimos 14 días, independiente de
+  // la fecha elegida arriba) — antes solo se guardaba histórico de
+  // planillas; este es el del envío principal (Diagrama -> Drivin).
+  const [enviosDrivin, setEnviosDrivin] = useState<EnviosDrivinTendencia | null>(null);
+  const [enviosDrivinLoading, setEnviosDrivinLoading] = useState(true);
+  useEffect(() => {
+    if (vista !== "comparativo") return;
+    setEnviosDrivinLoading(true);
+    getEnviosDrivinTendencia(14)
+      .then(setEnviosDrivin)
+      .catch(() => setEnviosDrivin(null))
+      .finally(() => setEnviosDrivinLoading(false));
+  }, [vista]);
+  const enviosDrivinBars = useMemo(
+    () => (enviosDrivin?.serie ?? []).map((d) => ({ label: d.fecha.slice(3), value: d.facturas, kg: d.kg })),
+    [enviosDrivin]
+  );
 
   async function handleRellenarEjecutado() {
     setRellenando(true);
@@ -1365,6 +1383,47 @@ function DashboardPageInner() {
                     </tbody>
                   </table>
                 )}
+              </div>
+            </>
+          )}
+
+          <h3 className="mt-3 text-sm font-bold text-[#14352a]">Histórico de envíos a Drivin (Diagrama)</h3>
+          {enviosDrivinLoading || !enviosDrivin ? (
+            <div className="flex flex-1"><PageLoader /></div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[1fr_320px]">
+                <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-[#14352a]">Facturas enviadas por día (14 días)</h2>
+                    <span className="text-xs text-[#7a8794]">total: {fmtN(enviosDrivinBars.reduce((s, d) => s + d.value, 0))}</span>
+                  </div>
+                  {enviosDrivinBars.every((d) => d.value === 0) ? (
+                    <div className="flex h-28 items-center justify-center text-xs text-[#9aa4af]">Sin envíos en este rango.</div>
+                  ) : (
+                    <SparkBars data={enviosDrivinBars} />
+                  )}
+                </div>
+                <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#9aa4af]">Últimos envíos</p>
+                  <div className="flex max-h-40 flex-col gap-1.5 overflow-y-auto text-xs">
+                    {enviosDrivin.ultimos.length === 0 ? (
+                      <span className="text-[#9aa4af]">Todavía no hay envíos registrados.</span>
+                    ) : (
+                      enviosDrivin.ultimos.map((e) => (
+                        <div key={e.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#f0f2ee] px-2 py-1.5">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-[#14352a]">{e.placas || "(sin placa)"} · {fmtN(e.totalFacturas)} facturas</p>
+                            <p className="text-[10px] text-[#9aa4af]">{new Date(e.createdAt).toLocaleString("es-CO")}</p>
+                          </div>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${e.exitoso ? "bg-[#e6f4ea] text-[#2f8f4e]" : "bg-[#fbeceb] text-[#b3261e]"}`}>
+                            {e.exitoso ? "OK" : "Error"}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </>
           )}

@@ -68,6 +68,17 @@ export const getComparativoClientes = (fecha?: string) => req<ComparativoCliente
 export const rellenarEjecutado = (fecha: string) =>
   req<{ ok: boolean; fecha: string; clientesRellenados: number }>("/dashboard/rellenar-ejecutado", { method: "POST", body: JSON.stringify({ fecha }) });
 
+// Historial real de envíos a Drivin desde Diagrama (día del envío, no de la
+// factura) — lo que antes solo se guardaba como histórico de planillas, ahora
+// también queda el del envío principal (Diagrama -> Drivin).
+export interface EnvioDrivinDia { fecha: string; facturas: number; kg: number; valor: number; envios: number; errores: number }
+export interface EnvioDrivinReciente {
+  id: string; createdAt: string; tipo: string; placas: string | null;
+  totalFacturas: number; totalKg: number; exitoso: boolean; errorMensaje: string | null;
+}
+export interface EnviosDrivinTendencia { serie: EnvioDrivinDia[]; ultimos: EnvioDrivinReciente[] }
+export const getEnviosDrivinTendencia = (dias = 14) => req<EnviosDrivinTendencia>(`/dashboard/envios-drivin?dias=${dias}`);
+
 // ── Pre-planificación (facturas TAT agrupadas por ciudad o barrio) ────────
 export interface PreplanProducto { tipoComercial: string; kg: number; valor: number }
 export interface PreplanDocumento {

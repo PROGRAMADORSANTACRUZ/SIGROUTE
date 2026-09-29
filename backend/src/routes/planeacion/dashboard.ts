@@ -164,6 +164,38 @@ function isoToDMY(iso: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
 
+// Lo REALMENTE ejecutado para el Comparativo: solo lo que se envió a Drivin
+// desde Diagrama (enviadoDrivinEn no nulo) -- lo cargado pero nunca enviado
+// no cuenta. Junta Orden (vivo, del día de hoy que aún no pasó por el
+// archivo de las 18:00) + OrdenHistorico (ya archivado por
+// limpiezaDiaria.ts), porque no se sabe de antemano si la fecha pedida ya
+// fue archivada o no.
+type OrdenEjecutada = {
+  clienteSistemaId: string | null;
+  cliente: string;
+  cantidadKg: number;
+  distribucion: string;
+  tatOrigen: string | null;
+  numeroOrden: string;
+  producto: string;
+};
+async function ordenesEjecutadasEnFecha(fechaDMY: string): Promise<OrdenEjecutada[]> {
+  const select = {
+    clienteSistemaId: true,
+    cliente: true,
+    cantidadKg: true,
+    distribucion: true,
+    tatOrigen: true,
+    numeroOrden: true,
+    producto: true,
+  } as const;
+  const [vivas, archivadas] = await Promise.all([
+    prisma.orden.findMany({ where: { fecha: fechaDMY, enviadoDrivinEn: { not: null } }, select }),
+    prisma.ordenHistorico.findMany({ where: { fecha: fechaDMY, enviadoDrivinEn: { not: null } }, select }),
+  ]);
+  return [...vivas, ...archivadas];
+}
+
 // Clasifica una línea de Orden ejecutada en una de las 7 categorías de
 // Programación — confirmado en vivo 2026-09-24 con datos reales: Bovino/
 // Porcino se distinguen por el prefijo B/P de numeroOrden (import Excel), TAT
@@ -197,10 +229,7 @@ router.get("/comparativo-clientes", async (req, res, next) => {
     const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha: fechaDate } } });
     const detalle = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id } }) : [];
 
-    const ordenes = await prisma.orden.findMany({
-      where: { fecha: isoToDMY(fechaStr) },
-      select: { clienteSistemaId: true, cliente: true, cantidadKg: true, distribucion: true, tatOrigen: true, numeroOrden: true, producto: true },
-    });
+    const ordenes = await ordenesEjecutadasEnFecha(isoToDMY(fechaStr));
 
     const planPorCliente = new Map<string, { total: number; porCategoria: Record<string, number> }>();
     for (const d of detalle) {
@@ -277,6 +306,61 @@ router.get("/comparativo-clientes", async (req, res, next) => {
       porCategoria,
       filas: filas.slice(0, 200),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/dashboard/envios-drivin?dias=14
+// Tendencia real de envíos a Drivin desde Diagrama (día del ENVÍO, no de la
+// factura) + los últimos envíos con su resultado, para auditar rápido. Es la
+// fuente que faltaba: hasta ahora solo se guardaba histórico de planillas;
+// esto es el historial del envío principal (Diagrama -> Drivin).
+router.get("/envios-drivin", async (req, res, next) => {
+  try {
+    const dias = Math.min(90, Math.max(1, Number(req.query.dias) || 14));
+    const desde = new Date();
+    desde.setHours(0, 0, 0, 0);
+    desde.setDate(desde.getDate() - (dias - 1));
+
+    const envios = await prisma.envioDrivin.findMany({
+      where: { createdAt: { gte: desde } },
+      select: { createdAt: true, exitoso: true, totalFacturas: true, totalKg: true, totalValor: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const porDia = new Map<string, { facturas: number; kg: number; valor: number; envios: number; errores: number }>();
+    for (const e of envios) {
+      const key = e.createdAt.toISOString().slice(0, 10);
+      const acc = porDia.get(key) ?? { facturas: 0, kg: 0, valor: 0, envios: 0, errores: 0 };
+      acc.envios++;
+      if (e.exitoso) {
+        acc.facturas += e.totalFacturas;
+        acc.kg += e.totalKg;
+        acc.valor += e.totalValor;
+      } else {
+        acc.errores++;
+      }
+      porDia.set(key, acc);
+    }
+    const serie = [...porDia.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([fecha, d]) => ({
+        fecha: fecha.slice(5),
+        facturas: d.facturas,
+        kg: Math.round(d.kg),
+        valor: Math.round(d.valor),
+        envios: d.envios,
+        errores: d.errores,
+      }));
+
+    const ultimos = await prisma.envioDrivin.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: { id: true, createdAt: true, tipo: true, placas: true, totalFacturas: true, totalKg: true, exitoso: true, errorMensaje: true },
+    });
+
+    res.json({ serie, ultimos });
   } catch (err) {
     next(err);
   }

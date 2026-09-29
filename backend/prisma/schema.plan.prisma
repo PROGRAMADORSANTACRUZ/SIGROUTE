@@ -17,11 +17,11 @@ datasource db {
 // ════════════════════════════════════════════════════════════════════════
 
 model Rol {
-  id                Int     @id @default(autoincrement())
-  nombre            String  @unique @db.VarChar(50)
-  descripcion       String? @default("") @db.VarChar(200)
-  activo            Boolean @default(true)
-  areaProgramacion  String? @map("area_programacion") @db.VarChar(50)
+  id               Int     @id @default(autoincrement())
+  nombre           String  @unique @db.VarChar(50)
+  descripcion      String? @default("") @db.VarChar(200)
+  activo           Boolean @default(true)
+  areaProgramacion String? @map("area_programacion") @db.VarChar(50)
 
   usuarios    Usuario[]
   rolPermisos RolPermiso[]
@@ -238,20 +238,20 @@ model ProgDetalle {
   // Las filas nuevas de Programación usan clienteId; destinoId queda solo para
   // filas históricas creadas antes de la migración a Clientes.
   clienteId                 String? @map("cliente_id")
-  klsBovino                 Float? @default(0) @map("kls_bovino")
-  klsVisceraBovino          Float? @default(0) @map("kls_viscera_bovino")
-  canastillasBovino         Int?   @default(0) @map("canastillas_bovino")
-  canastillasVisceraBovino  Int?   @default(0) @map("canastillas_viscera_bovino")
-  klsPorcino                Float? @default(0) @map("kls_porcino")
-  klsVisceraPorcino         Float? @default(0) @map("kls_viscera_porcino")
-  canastillasPorcino        Int?   @default(0) @map("canastillas_porcino")
-  canastillasVisceraPorcino Int?   @default(0) @map("canastillas_viscera_porcino")
-  klsInversion              Float? @default(0) @map("kls_inversion")
-  canastillasInversion      Int?   @default(0) @map("canastillas_inversion")
-  klsTat                    Float? @default(0) @map("kls_tat")
-  canastillasTat            Int?   @default(0) @map("canastillas_tat")
-  klsOtros                  Float? @default(0) @map("kls_otros")
-  canastillasOtros          Int?   @default(0) @map("canastillas_otros")
+  klsBovino                 Float?  @default(0) @map("kls_bovino")
+  klsVisceraBovino          Float?  @default(0) @map("kls_viscera_bovino")
+  canastillasBovino         Int?    @default(0) @map("canastillas_bovino")
+  canastillasVisceraBovino  Int?    @default(0) @map("canastillas_viscera_bovino")
+  klsPorcino                Float?  @default(0) @map("kls_porcino")
+  klsVisceraPorcino         Float?  @default(0) @map("kls_viscera_porcino")
+  canastillasPorcino        Int?    @default(0) @map("canastillas_porcino")
+  canastillasVisceraPorcino Int?    @default(0) @map("canastillas_viscera_porcino")
+  klsInversion              Float?  @default(0) @map("kls_inversion")
+  canastillasInversion      Int?    @default(0) @map("canastillas_inversion")
+  klsTat                    Float?  @default(0) @map("kls_tat")
+  canastillasTat            Int?    @default(0) @map("canastillas_tat")
+  klsOtros                  Float?  @default(0) @map("kls_otros")
+  canastillasOtros          Int?    @default(0) @map("canastillas_otros")
 
   programacion Programacion @relation(fields: [progId], references: [id], onDelete: Cascade)
   destino      Destino?     @relation(fields: [destinoId], references: [id])
@@ -691,21 +691,21 @@ model ErrandsCliente {
 }
 
 model ErrandsPedido {
-  id              Int      @id @default(autoincrement())
-  numeroPedido    String   @unique @map("numero_pedido") @db.VarChar(30)
-  clienteId       Int      @map("cliente_id")
-  puntoVentaId    Int?     @map("punto_venta_id")
-  domiciliarioId  Int?     @map("domiciliario_id")
-  kilos           Float    @default(1)
-  estado          String   @default("REVISADO") @db.VarChar(20)
-  observaciones   String?
-  fecha           DateTime @default(now())
-  usuario         String?  @db.VarChar(60)
-  createdAt       DateTime @default(now()) @map("created_at")
+  id                  Int       @id @default(autoincrement())
+  numeroPedido        String    @unique @map("numero_pedido") @db.VarChar(30)
+  clienteId           Int       @map("cliente_id")
+  puntoVentaId        Int?      @map("punto_venta_id")
+  domiciliarioId      Int?      @map("domiciliario_id")
+  kilos               Float     @default(1)
+  estado              String    @default("REVISADO") @db.VarChar(20)
+  observaciones       String?
+  fecha               DateTime  @default(now())
+  usuario             String?   @db.VarChar(60)
+  createdAt           DateTime  @default(now()) @map("created_at")
   // Estado del ENVÍO a Drivin (creación de la orden allá), no del pipeline
   // local: PENDIENTE (aún no se intentó) | ENVIADO | ERROR.
-  drivinEstadoEnvio  String    @default("PENDIENTE") @map("drivin_estado_envio") @db.VarChar(20)
-  drivinMensajeEnvio String?   @map("drivin_mensaje_envio")
+  drivinEstadoEnvio   String    @default("PENDIENTE") @map("drivin_estado_envio") @db.VarChar(20)
+  drivinMensajeEnvio  String?   @map("drivin_mensaje_envio")
   // Estado de ENTREGA leído de Drivin (POD): se refresca con "Sincronizar con
   // Drivin" y ahí mismo actualiza el `estado` de arriba (Entregado/Cancelado).
   drivinEstadoEntrega String?   @map("drivin_estado_entrega") @db.VarChar(30)
@@ -770,19 +770,19 @@ model Vehiculo {
 }
 
 model Orden {
-  id          String   @id @default(cuid())
-  fecha       String
-  numeroOrden String
-  cliente     String
-  destino     String
-  producto    String
+  id             String  @id @default(cuid())
+  fecha          String
+  numeroOrden    String
+  cliente        String
+  destino        String
+  producto       String
   // Código Siesa del producto (referencia), ej. "2407" de "2407 - PULGAREJO
   // CERDO COMESTIBLE" — solo disponible en órdenes cargadas desde Siesa (TAT/
   // Inversiones, viene como prefijo de tipo_comercial); null en Bovino/Porcino
   // cargados por Excel (ese archivo no trae código de producto).
-  productoCodigo String?  @db.VarChar(40)
-  cantidadKg  Float    @default(0)
-  estado      String   @default("Pendiente")
+  productoCodigo String? @db.VarChar(40)
+  cantidadKg     Float   @default(0)
+  estado         String  @default("Pendiente")
 
   nit    String?
   codigo String?
@@ -795,7 +795,7 @@ model Orden {
   // campo "Ciudad" porque usaban Orden.destino (que en TAT es una clave de
   // agrupación/asignación, no una ciudad) — bug real encontrado al verificar
   // visualmente contra una factura impresa.
-  ciudad String?
+  ciudad    String?
 
   clienteSistemaId String?
 
@@ -807,8 +807,8 @@ model Orden {
   // cargadas por Excel (Bovino/Porcino), que nunca pasan por el escáner.
   // El QR de la DIAN no trae la firma digital completa (solo CUFE + resumen +
   // URL de validación), así que esa sigue sin poder reproducirse.
-  cufe    String?
-  qrTexto String? @db.Text
+  cufe         String?
+  qrTexto      String? @db.Text
   // Firma digital electrónica completa de la factura (texto/base64), pendiente
   // de que se habilite el endpoint de Siesa que la expone — verificado en vivo
   // 2026-09-24 que "ventas/facturas-agropecuaria-tat"/"facturas-tat-inversiones"
@@ -837,7 +837,13 @@ model Orden {
   // Fecha de despacho editable (distinta de `fecha`, que viene fija del
   // Excel/factura importada); si se define, la orden se muestra agrupada en
   // Diagrama bajo esta fecha en vez de "hoy".
-  fechaDespacho DateTime?
+  fechaDespacho    DateTime?
+
+  // Se llenan SOLO si esta orden fue realmente incluida en un envío exitoso a
+  // Drivin desde Diagrama (ver EnvioDrivin) -- cargada pero nunca enviada no
+  // cuenta como "ejecutada" para efectos de reportes/dashboard.
+  envioDrivinId   String?
+  enviadoDrivinEn DateTime?
 
   createdAt DateTime @default(now())
 
@@ -848,6 +854,7 @@ model Orden {
   @@index([fecha])
   @@index([ruta])
   @@index([area])
+  @@index([enviadoDrivinEn])
 }
 
 // Color asignado a una ruta (por nombre, ej. "Ruta 3") para que se vea
@@ -917,28 +924,28 @@ model Cliente {
 }
 
 model PlanillaDespacho {
-  id           String    @id @default(cuid())
-  consecutivo  Int
-  fecha        String
-  placa        String
-  conductor    String?
-  origen       String?
-  horaSalida   String?
-  auxiliarRuta String?
-  tipoDespacho String?
-  ruta         String?
-  docs         Int       @default(0)
-  kilos        Float     @default(0)
-  clientes     String?
-  documentos   String?
-  items        String?
-  anulada      Boolean   @default(false)
-  anuladaAt    DateTime?
-  impresa      Boolean   @default(false)
-  impresaAt    DateTime?
+  id                        String    @id @default(cuid())
+  consecutivo               Int
+  fecha                     String
+  placa                     String
+  conductor                 String?
+  origen                    String?
+  horaSalida                String?
+  auxiliarRuta              String?
+  tipoDespacho              String?
+  ruta                      String?
+  docs                      Int       @default(0)
+  kilos                     Float     @default(0)
+  clientes                  String?
+  documentos                String?
+  items                     String?
+  anulada                   Boolean   @default(false)
+  anuladaAt                 DateTime?
+  impresa                   Boolean   @default(false)
+  impresaAt                 DateTime?
   reemplazadaPorConsecutivo Int?
   reemplazaDeConsecutivo    Int?
-  createdAt    DateTime  @default(now())
+  createdAt                 DateTime  @default(now())
 
   @@index([fecha])
   @@index([placa])
@@ -1021,6 +1028,109 @@ model EnvioReplica {
   updatedAt DateTime @default(now()) @updatedAt
 }
 
+// Historial DURABLE (nunca se borra) de cada intento de envío a Drivin desde
+// Diagrama -- "crear" (POST /v2/scenarios) o "agregar" (POST /v2/orders a un
+// escenario existente), éxito o error. Es la fuente real de "qué se ejecutó"
+// (a diferencia de Orden, que se archiva/limpia a diario -- ver
+// limpiezaDiaria.ts y OrdenHistorico).
+model EnvioDrivin {
+  id                  String   @id @default(cuid())
+  createdAt           DateTime @default(now())
+  tipo                String // "crear" | "agregar"
+  usuarioNombre       String?
+  scenarioToken       String?
+  scenarioDescripcion String?
+  fleetName           String?
+  schemaName          String?
+  placas              String? // csv de placas involucradas
+  totalFacturas       Int      @default(0)
+  totalKg             Float    @default(0)
+  totalValor          Float    @default(0)
+  exitoso             Boolean
+  httpStatus          Int?
+  errorMensaje        String?  @db.Text
+
+  facturas EnvioDrivinFactura[]
+
+  @@index([createdAt])
+  @@index([exitoso])
+}
+
+// Detalle factura por factura de un EnvioDrivin -- una fila por cada "orden"
+// (grupo por numeroOrden+destino) que realmente viajó en el payload a Drivin.
+model EnvioDrivinFactura {
+  id            String      @id @default(cuid())
+  envioId       String
+  envio         EnvioDrivin @relation(fields: [envioId], references: [id])
+  ordenId       String? // Orden.id si aún es resolvible al momento del envío
+  numeroOrden   String
+  cliente       String?
+  destino       String?
+  placa         String?
+  cantidadKg    Float       @default(0)
+  valor         Float       @default(0)
+  distribucion  String?
+  fecha         String? // fecha de factura (Orden.fecha), no la del envío
+  productosJson String?     @db.Text // snapshot de los items mandados a Drivin
+
+  @@index([envioId])
+  @@index([numeroOrden])
+  @@index([fecha])
+}
+
+// Archivo 1:1 de Orden, poblado por limpiezaDiaria.ts justo ANTES de vaciar
+// Orden cada día a las 18:00 -- el borrado diario es "visual" (limpia la
+// carga activa de Diagrama/Ejecución) pero la data completa queda acá para
+// siempre, incluido si fue realmente enviada a Drivin (envioDrivinId).
+model OrdenHistorico {
+  id               String    @id @default(cuid())
+  ordenOriginalId  String // id que tenía en Orden antes de archivarse
+  fecha            String
+  numeroOrden      String
+  cliente          String
+  destino          String
+  producto         String
+  productoCodigo   String?
+  cantidadKg       Float     @default(0)
+  estado           String
+  nit              String?
+  codigo           String?
+  valor            Float     @default(0)
+  direccion        String?
+  vendedor         String?
+  ciudad           String?
+  clienteSistemaId String?
+  distribucion     String
+  tatOrigen        String?
+  cufe             String?
+  qrTexto          String?   @db.Text
+  firmaDigital     String?   @db.Text
+  podCode          String?
+  scenarioToken    String?
+  deliveredBy      String?
+  podLat           Float?
+  podLng           Float?
+  reasonName       String?
+  reasonCode       String?
+  reenviado        Boolean   @default(false)
+  reenviadoAt      DateTime?
+  asignadoVehiculo String?
+  ruta             String?
+  area             String?
+  fechaDespacho    DateTime?
+  envioDrivinId    String?
+  enviadoDrivinEn  DateTime?
+  createdAt        DateTime // createdAt original de la Orden, no el del archivo
+  archivadoEn      DateTime  @default(now())
+
+  @@index([numeroOrden])
+  @@index([fecha])
+  @@index([distribucion])
+  @@index([enviadoDrivinEn])
+  @@index([area])
+  @@index([archivadoEn])
+}
+
 // Registro crudo de una fila capturada en la plantilla TAT (Agropecuaria o
 // Inversiones) — antes de cruzarla con la API de facturas (Siesa/apiconsulta).
 // Se conserva aunque el cruce falle, para poder corregir y reintentar.
@@ -1039,10 +1149,10 @@ model OrdenTatPlantilla {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@unique([origen, numeroOrden])
   @@index([origen])
   @@index([numeroOrden])
   @@index([estado])
-  @@unique([origen, numeroOrden])
 }
 
 // Borrador EN VIVO de la grilla de captura de la plantilla TAT (persistido en
@@ -1061,4 +1171,3 @@ model PlantillaTatBorrador {
   @@unique([origen, jornada, posicion])
   @@index([origen, jornada])
 }
-
