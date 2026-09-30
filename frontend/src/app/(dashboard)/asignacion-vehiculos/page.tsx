@@ -422,6 +422,17 @@ export default function AsignacionVehiculosPage() {
       return;
     }
 
+    // Un vehículo ya con ruta asignada NO puede tomar otra: se usa esa misma
+    // ruta directo (sin volver a preguntar) para cualquier orden nueva que se
+    // le agregue, sea cual sea la ruta que traigan esas órdenes.
+    const rutaBloqueada = asignadasPorPlaca(vehiculo.placa)
+      .map((g) => (g.ruta ?? "").trim())
+      .find(Boolean);
+    if (rutaBloqueada) {
+      await finalizarAsignacion(vehiculo, queCaben, noQueCaben, rutaBloqueada);
+      return;
+    }
+
     // Si TODAS las órdenes que caben ya traen la MISMA ruta (cargada desde
     // Cargar Órdenes al pistolear/traer todas), se usa esa directo y no se
     // vuelve a preguntar — solo se pide si falta o si vienen mezcladas.
@@ -443,7 +454,8 @@ export default function AsignacionVehiculosPage() {
     vehiculo: VehiculoExterno,
     queCaben: OrdenGrupo[],
     noQueCaben: { key: string; numeroOrden: string; kg: number }[],
-    ruta: string
+    ruta: string,
+    ciudadFlete?: string
   ) {
     setGuardandoRuta(true);
     setError(null);
@@ -451,7 +463,7 @@ export default function AsignacionVehiculosPage() {
     try {
       const ids = queCaben.flatMap((g) => g.ids);
       await asignarOrdenes(ids, vehiculo.placa);
-      await asignarRutaOrdenes(ids, ruta, vehiculo.placa);
+      await asignarRutaOrdenes(ids, ruta, vehiculo.placa, ciudadFlete);
       const totalSeleccionadas = queCaben.length + noQueCaben.length;
       const msg = queCaben.length === totalSeleccionadas
         ? `Se asignaron ${queCaben.length} órdenes a ${vehiculo.placa} (ruta "${ruta}").`
@@ -477,7 +489,12 @@ export default function AsignacionVehiculosPage() {
     const { vehiculo, queCaben, noQueCaben } = rutaModal;
     const ruta = rutaSel.trim();
     if (!ruta) return;
-    await finalizarAsignacion(vehiculo, queCaben, noQueCaben, ruta);
+    // Se guarda el nombre de la RUTA OPERATIVA elegida (ej. "CARTAGENA-PDV",
+    // la que se ve y se agrupa en Clientes por Ruta/Diagrama) cuando se
+    // seleccionó una; `rutaSel` (la ciudad de flete, ej. "CARTAGENA") queda
+    // aparte solo para calcular el precio de flete del vehículo.
+    const nombreRuta = rutaOperativaSel?.nombre || ruta;
+    await finalizarAsignacion(vehiculo, queCaben, noQueCaben, nombreRuta, ruta);
   }
 
   async function quitar(g: OrdenGrupo) {
@@ -1090,6 +1107,9 @@ export default function AsignacionVehiculosPage() {
                     })
                     .map((v) => {
                       const kgUsado = asignadasPorPlaca(v.placa).reduce((s, g) => s + g.totalKg, 0);
+                      const rutaVeh = asignadasPorPlaca(v.placa)
+                        .map((g) => (g.ruta ?? "").trim())
+                        .find(Boolean);
                       const capNormal = v.capacidad ? parseFloat(v.capacidad) : null;
                       const capReal = v.capacidadReal ? parseFloat(v.capacidadReal) : null;
                       // Capacidad efectiva: la real si existe, si no la de tarjeta —
@@ -1128,6 +1148,14 @@ export default function AsignacionVehiculosPage() {
                                 >
                                   <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18M3 12c0-4.4 3.6-8 8-8M3 12c0 4.4 3.6 8 8 8M21 12c0-4.4-3.6-8-8-8M21 12c0 4.4-3.6 8-8 8M11 4c2 3 2 10 0 16M13 4c-2 3-2 10 0 16" /></svg>
                                   Ruta #{preasignacionHoy[v.placa.toUpperCase().trim()].numeroRuta} preasignada
+                                </span>
+                              )}
+                              {rutaVeh && (
+                                <span
+                                  title={`Ya tiene la ruta "${rutaVeh}" asignada — no se puede cambiar mientras tenga órdenes con esa ruta`}
+                                  className="inline-flex items-center gap-1 rounded-full bg-[#eef7f0] px-2 py-0.5 text-[10px] font-medium text-[#2f8f4e]"
+                                >
+                                  Ruta: {rutaVeh}
                                 </span>
                               )}
                             </div>

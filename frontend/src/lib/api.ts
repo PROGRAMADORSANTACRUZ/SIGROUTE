@@ -573,11 +573,12 @@ export function eliminarOrdenesPorIds(
 export function asignarRutaOrdenes(
   ids: string[],
   ruta: string,
-  placa?: string
+  placa?: string,
+  ciudadFlete?: string
 ): Promise<{ actualizados: number; ruta: string | null; precioFlete: string | null }> {
   return request<{ actualizados: number; ruta: string | null; precioFlete: string | null }>("/api/ordenes/asignar-ruta", {
     method: "POST",
-    body: JSON.stringify({ ids, ruta, placa }),
+    body: JSON.stringify({ ids, ruta, placa, ciudadFlete }),
   });
 }
 

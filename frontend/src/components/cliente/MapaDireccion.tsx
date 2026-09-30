@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
-const MapaLeaflet = dynamic(() => import("./MapaLeaflet"), {
+const MapaGoogle = dynamic(() => import("./MapaGoogle"), {
   ssr: false,
   loading: () => (
     <div className="flex h-[220px] items-center justify-center rounded-xl bg-[#f7faf5] text-sm text-[#7a8794]">
@@ -331,7 +331,7 @@ export default function MapaDireccion({
 
       {abierto && (
         <div className="mt-2 isolate overflow-hidden rounded-xl">
-          <MapaLeaflet
+          <MapaGoogle
             lat={centroLat}
             lng={centroLng}
             height={altoMapa}

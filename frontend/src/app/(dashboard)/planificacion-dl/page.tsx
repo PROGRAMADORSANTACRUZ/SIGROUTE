@@ -386,13 +386,27 @@ export default function PlanificacionDLPage() {
     });
   }
 
+  // La ruta ya viene decidida desde Asignación de órdenes (un vehículo solo
+  // puede tener UNA ruta asignada) — se lee de sus propias órdenes en vez de
+  // pedirla de nuevo. Si por algún dato viejo trajera rutas mezcladas o
+  // ninguna, se deja en blanco para elegirla a mano (no se adivina).
+  function rutaDeVehiculo(placa: string): string {
+    const rutas = new Set(
+      ordenes
+        .filter((o) => o.asignadoVehiculo?.toUpperCase() === placa.toUpperCase() && o.estado !== "Entregado" && o.estado !== "Rechazado")
+        .map((o) => (o.ruta ?? "").trim())
+        .filter(Boolean)
+    );
+    return rutas.size === 1 ? [...rutas][0] : "";
+  }
+
   function seleccionar(d: Despacho) {
     setPlacaSel(d.placa);
     setOrigen("MALAMBO");
     setHoraSalida(new Date().toTimeString().slice(0, 5));
     setAuxiliar("");
     setTipos([]);
-    setRuta("");
+    setRuta(rutaDeVehiculo(d.placa));
     setMessage(null);
   }
 

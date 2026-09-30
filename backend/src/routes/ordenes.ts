@@ -2051,6 +2051,11 @@ router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.edit
       throw new HttpError(400, "No se recibieron órdenes");
     }
     const ruta = String(req.body?.ruta ?? "").trim().slice(0, 60) || null;
+    // Ciudad de tarifa (tabla de fletes) para calcular el precio -- puede ser
+    // distinta del nombre de ruta que se guarda/muestra (ej. la ruta operativa
+    // "CARTAGENA-PDV" se factura con la tarifa de la ciudad "CARTAGENA"). Si no
+    // viene, se usa `ruta` tal cual (compatibilidad con el modal de texto libre).
+    const ciudadFlete = req.body?.ciudadFlete ? String(req.body.ciudadFlete).trim() : ruta;
     const { count } = await prisma.orden.updateMany({
       where: { id: { in: ids.map(String) } },
       data: { ruta },
@@ -2058,10 +2063,10 @@ router.post("/asignar-ruta", requireAuth, requirePermiso("distrilog.ordenes.edit
 
     let precioFlete: string | null = null;
     const placa = req.body?.placa ? String(req.body.placa).trim().toUpperCase() : null;
-    if (placa && ruta) {
+    if (placa && ciudadFlete) {
       const vehiculo = await prisma.vehiculo.findUnique({ where: { placa }, select: { capacidad: true, capacidadReal: true } });
       const peso = capacidadEfectiva(vehiculo);
-      const flete = calcularFlete(ruta, peso);
+      const flete = calcularFlete(ciudadFlete, peso);
       if (flete != null) {
         precioFlete = String(flete);
         await prisma.vehiculo.upsert({
