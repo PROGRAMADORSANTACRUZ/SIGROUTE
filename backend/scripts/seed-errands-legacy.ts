@@ -417,7 +417,7 @@ async function main() {
   const rows = await prisma.errandsCliente.findMany({ select: { codigo: true } });
   let maxCodigo = 0;
   for (const r of rows) {
-    const m = /^ERR(\d+)$/.exec(r.codigo);
+    const m = /^Run123(\d+)$/.exec(r.codigo);
     if (m) maxCodigo = Math.max(maxCodigo, Number(m[1]));
   }
 
@@ -432,7 +432,7 @@ async function main() {
     maxCodigo += 1;
     await prisma.errandsCliente.create({
       data: {
-        codigo: `ERR${String(maxCodigo).padStart(5, "0")}`,
+        codigo: `Run123${String(maxCodigo).padStart(2, "0")}`,
         nombre,
         direccion: direccion?.trim() || null,
         barrio: barrio?.trim() || null,

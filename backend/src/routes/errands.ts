@@ -280,14 +280,20 @@ const clienteSchema = z.object({
   observaciones: z.string().trim().optional(),
 });
 
+// Código del cliente (equivale a su cédula/NIT, NO al consecutivo del
+// documento): "Run123" + el número de secuencia que le toque (01, 02, 10,
+// 50, 300, 1058...), en el orden en que se van creando los clientes.
+// Confirmado con Carlos Barbas (WhatsApp 1/oct/2026): "todos los codigos Run
+// son Run123** -- ** es el numero de secuencia"; el consecutivo del
+// documento (OSRun***) es un código aparte, no se toca acá.
 async function siguienteCodigoCliente(): Promise<string> {
   const rows = await prisma.errandsCliente.findMany({ select: { codigo: true } });
   let max = 0;
   for (const r of rows) {
-    const m = /^ERR(\d+)$/.exec(r.codigo);
+    const m = /^Run123(\d+)$/.exec(r.codigo);
     if (m) max = Math.max(max, Number(m[1]));
   }
-  return `ERR${String(max + 1).padStart(5, "0")}`;
+  return `Run123${String(max + 1).padStart(2, "0")}`;
 }
 
 router.post("/clientes", requirePermiso("distrilog.errands.editar"), async (req, res, next) => {
