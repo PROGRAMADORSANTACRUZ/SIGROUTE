@@ -10,7 +10,6 @@ import planillasRouter from "./planillas";
 import novedadesRouter from "./novedades";
 import configRouter from "./config";
 import planeacionRouter from "./planeacion";
-import errandsRouter from "./errands";
 import provisioningRouter from "./provisioning";
 import resumenRouter from "./resumen";
 // NOTA: el antiguo `users.ts` (gestión simple de usuarios de DISTRILOG) fue
@@ -30,7 +29,6 @@ router.use("/planillas", planillasRouter);
 router.use("/novedades", novedadesRouter);
 router.use("/config", configRouter);
 router.use("/planeacion", planeacionRouter);
-router.use("/errands", errandsRouter);
 router.use("/provisioning", provisioningRouter);
 router.use("/resumen-ejecutivo", resumenRouter);
 

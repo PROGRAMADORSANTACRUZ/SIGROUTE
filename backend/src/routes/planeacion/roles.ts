@@ -42,7 +42,6 @@ export const MODULOS: ModuloGrupo[] = [
       { label: "Planificación D.L.", claves: ["distrilog.planificacion_dl.ver", "distrilog.planificacion_dl.editar"] },
       { label: "Históricos", claves: ["distrilog.historicos.ver"] },
       { label: "Nivel de servicio", claves: ["distrilog.nivel_servicio.ver", "distrilog.nivel_servicio.editar"] },
-      { label: "Run Errands", claves: ["distrilog.errands.ver", "distrilog.errands.editar"] },
     ],
   },
   {
@@ -70,7 +69,6 @@ export const MODULOS: ModuloGrupo[] = [
     submodulos: [
       { label: "Ejecución", claves: ["dashboard.ejecucion.ver"] },
       { label: "Planeación", claves: ["dashboard.planeacion.ver"] },
-      { label: "Run Errands", claves: ["dashboard.errands.ver"] },
       { label: "Comparativo", claves: ["dashboard.comparativo.ver"] },
     ],
   },

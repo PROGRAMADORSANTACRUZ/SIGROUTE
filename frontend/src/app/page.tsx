@@ -25,7 +25,7 @@ const iconEjecucion = (
 
 const PANELES: { grupo: Modulo["grupo"]; titulo: string; descripcion: string; icon: React.ReactNode }[] = [
   { grupo: "Planeación", titulo: "Planeación", descripcion: "Planificación, preasignación, distribución y reportes.", icon: iconPlaneacion },
-  { grupo: "Ejecución", titulo: "Ejecución", descripcion: "Cargue de órdenes, despacho, nivel de servicio y Run Errands.", icon: iconEjecucion },
+  { grupo: "Ejecución", titulo: "Ejecución", descripcion: "Cargue de órdenes, despacho y nivel de servicio.", icon: iconEjecucion },
 ];
 
 export default function PanelSelector() {

@@ -30,7 +30,6 @@ export const MODULOS: Modulo[] = [
   { key: "/planificacion-dl", label: "Planificación D.L.", grupo: "Ejecución", permiso: "distrilog.planificacion_dl.ver" },
   { key: "/historicos", label: "Históricos", grupo: "Ejecución", permiso: "distrilog.historicos.ver" },
   { key: "/nivel-de-servicio", label: "Nivel de servicio", grupo: "Ejecución", permiso: "distrilog.nivel_servicio.ver" },
-  { key: "/errands", label: "Run Errands", grupo: "Ejecución", permiso: "distrilog.errands.ver" },
   { key: "/plantillas-tat/agropecuaria", label: "Plantilla TAT Agropecuaria", grupo: "Ejecución", permiso: "plantillas_tat.ver" },
   { key: "/plantillas-tat/inversiones", label: "Plantilla TAT Inversiones", grupo: "Ejecución", permiso: "plantillas_tat.ver" },
 

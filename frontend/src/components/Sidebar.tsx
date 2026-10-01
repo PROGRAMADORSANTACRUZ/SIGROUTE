@@ -112,13 +112,6 @@ const gearIcon = (
   </svg>
 );
 
-const errandsIcon = (
-  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 8v4l2.5 2.5" />
-  </svg>
-);
-
 const mapPinIcon = (
   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z" /><circle cx="12" cy="10" r="3" />
@@ -173,9 +166,6 @@ const navGroups: NavGroup[] = [
           { href: "/nivel-de-servicio/tat", label: "TAT", icon: nivelServicioIcon },
         ],
       },
-      // Placeholder: el módulo real (antes embebido vía iframe SIGLOG) aún no
-      // tiene lógica propia — se deja el ítem listo para conectarlo después.
-      { href: "/errands", label: "Run Errands", icon: errandsIcon },
       { href: "/plantillas-tat/agropecuaria", label: "TAT Agropecuaria", icon: plantillaIcon },
       { href: "/plantillas-tat/inversiones", label: "TAT Inversiones", icon: plantillaIcon },
     ],

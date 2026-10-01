@@ -15,7 +15,6 @@ import {
   type VehiculoExterno,
 } from "@/lib/api";
 import { getDashboardPlan, getResumen as getResumenPlan, getComparativoAdmin, getComparativoClientes, rellenarEjecutado, getEnviosDrivinTendencia, type ComparativoAdmin, type ComparativoClientes, type EnviosDrivinTendencia } from "@/lib/planApi";
-import { getErrandsDashboard, type ErrandsDashboard } from "@/lib/errandsApi";
 import { capacidadEfectiva } from "@/lib/utils";
 import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
@@ -204,24 +203,22 @@ function DashboardPageInner() {
   const panel = useSearchParams().get("panel");
   const puedeVerEjecucion = usePermiso("dashboard.ejecucion.ver");
   const puedeVerPlaneacion = usePermiso("dashboard.planeacion.ver");
-  const puedeVerErrands = usePermiso("dashboard.errands.ver");
   const puedeVerComparativo = usePermiso("dashboard.comparativo.ver");
-  const [vista, setVista] = useState<"ejecucion" | "planeacion" | "run-errands" | "comparativo">("ejecucion");
+  const [vista, setVista] = useState<"ejecucion" | "planeacion" | "comparativo">("ejecucion");
 
   // Por defecto viene la pestaña del panel por el que se entró (?panel=...);
   // si esa (o la que ya estaba activa) deja de estar permitida, se mueve a la
   // primera pestaña a la que sí tenga acceso.
   useEffect(() => {
     const permitido: Record<typeof vista, boolean> = {
-      ejecucion: puedeVerEjecucion, planeacion: puedeVerPlaneacion,
-      "run-errands": puedeVerErrands, comparativo: puedeVerComparativo,
+      ejecucion: puedeVerEjecucion, planeacion: puedeVerPlaneacion, comparativo: puedeVerComparativo,
     };
     const preferida = panel === "planeacion" ? "planeacion" : panel === "ejecucion" ? "ejecucion" : null;
     if (preferida && permitido[preferida]) { setVista(preferida); return; }
     if (permitido[vista]) return;
     const primero = (Object.keys(permitido) as (typeof vista)[]).find((v) => permitido[v]);
     if (primero) setVista(primero);
-  }, [panel, puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [panel, puedeVerEjecucion, puedeVerPlaneacion, puedeVerComparativo]); // eslint-disable-line react-hooks/exhaustive-deps
   const [resumen, setResumen] = useState<OrdenesResumen | null>(null);
   const [planillas, setPlanillas] = useState<Planilla[]>([]);
   const [novedades, setNovedades] = useState<Novedad[]>([]);
@@ -256,23 +253,6 @@ function DashboardPageInner() {
       })
       .finally(() => setPlanLoading(false));
   }, [planFecha]);
-
-  // ── Run Errands ──
-  const [errandsDesde, setErrandsDesde] = useState("");
-  const [errandsHasta, setErrandsHasta] = useState("");
-  const [errandsData, setErrandsData] = useState<ErrandsDashboard | null>(null);
-  const [errandsLoading, setErrandsLoading] = useState(true);
-
-  const cargarErrands = useCallback(() => {
-    setErrandsLoading(true);
-    getErrandsDashboard({ desde: errandsDesde || undefined, hasta: errandsHasta || undefined })
-      .then(setErrandsData)
-      .finally(() => setErrandsLoading(false));
-  }, [errandsDesde, errandsHasta]);
-
-  useEffect(() => {
-    if (vista === "run-errands") cargarErrands();
-  }, [vista, cargarErrands]);
 
   // ── Comparativo Planeación vs Ejecución (solo ADMIN) ──
   const [compFecha, setCompFecha] = useState(() => new Date().toISOString().slice(0, 10));
@@ -481,8 +461,8 @@ function DashboardPageInner() {
   }, [resumen, planillas, novedades, vehiculos, ejecDesde, ejecHasta]);
 
   // El selector de pestañas solo tiene sentido si hay más de una para elegir
-  // (p. ej. dentro del panel Ejecución: Ejecución + Run Errands + Comparativo).
-  const tabsVisibles = [puedeVerEjecucion, puedeVerPlaneacion, puedeVerErrands, puedeVerComparativo].filter(Boolean).length;
+  // (p. ej. dentro del panel Ejecución: Ejecución + Comparativo).
+  const tabsVisibles = [puedeVerEjecucion, puedeVerPlaneacion, puedeVerComparativo].filter(Boolean).length;
 
   return (
     <div className="flex h-full flex-col overflow-auto p-3 sm:p-4">
@@ -508,14 +488,6 @@ function DashboardPageInner() {
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "planeacion" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
               >
                 Planeación
-              </button>
-            )}
-            {puedeVerErrands && (
-              <button
-                onClick={() => setVista("run-errands")}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${vista === "run-errands" ? "bg-[#2f8f4e] text-white" : "text-[#5f7a68] hover:bg-[#f4f6f3]"}`}
-              >
-                Run Errands
               </button>
             )}
             {puedeVerComparativo && (
@@ -1091,149 +1063,6 @@ function DashboardPageInner() {
           </div>
 
         </div>
-      ) : vista === "run-errands" ? (
-        errandsLoading || !errandsData ? (
-          <div className="flex flex-1"><PageLoader /></div>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-
-          {(() => {
-            const pendientes = errandsData.porEstado.find((e) => e.label === "PENDIENTE")?.value ?? 0;
-            const enProceso = errandsData.porEstado.find((e) => e.label === "EN_PROCESO")?.value ?? 0;
-            const promedioKg = errandsData.totalPedidos > 0 ? errandsData.totalKilos / errandsData.totalPedidos : 0;
-            const ESTADO_COLOR_DONUT: Record<string, string> = {
-              PENDIENTE: "#e3a53b", EN_PROCESO: "#1a5fb4", ENTREGADO: "#2f8f4e",
-              CANCELADO: "#b3261e", EDITADO: "#9aa4af", REVISADO: "#57b17a",
-            };
-            return (
-              <>
-                {/* Row 1: KPIs principales */}
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-                  <StatCard label="Pedidos" value={fmtN(errandsData.totalPedidos)} sub="en el rango seleccionado"
-                    icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11l3.5 7-9 11L3 10Z"/><path d="M3 10h18"/></svg>} />
-                  <StatCard label="Pendientes" value={fmtN(pendientes)} sub={`${fmtN(enProceso)} en proceso`}
-                    color={pendientes > 0 ? "#a86a12" : "#2f8f4e"}
-                    bg={pendientes > 0 ? "bg-[#fdf6e9]" : "bg-white"}
-                    icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>} />
-                  <StatCard label="Kilos" value={fmtKg(errandsData.totalKilos)} sub={`${promedioKg.toFixed(1)} kg / pedido`}
-                    color="#2f8f4e"
-                    icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M6.5 3h11l3.5 7-9 11L3 10Z"/></svg>} />
-                  <StatCard label="Puntos de venta" value={fmtN(errandsData.totalPuntosVenta)} sub="activos"
-                    icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M4 9h16v11H4z"/><path d="M9 20v-6h6v6"/></svg>} />
-                  <StatCard label="Clientes" value={fmtN(errandsData.totalClientes)} sub="destinos activos"
-                    icon={<svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>} />
-                </div>
-
-                {/* Fila 0: Accesos rápidos */}
-                <div className="nice-scroll flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-                  <input type="date" value={errandsDesde} onChange={(e) => setErrandsDesde(e.target.value)}
-                    className="shrink-0 rounded-full border border-[#dfe4e0] bg-white px-3.5 py-2 text-xs font-medium text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-                  <input type="date" value={errandsHasta} onChange={(e) => setErrandsHasta(e.target.value)}
-                    className="shrink-0 rounded-full border border-[#dfe4e0] bg-white px-3.5 py-2 text-xs font-medium text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-                  {(errandsDesde || errandsHasta) && (
-                    <button onClick={() => { setErrandsDesde(""); setErrandsHasta(""); }} className="shrink-0 text-xs font-medium text-[#2f8f4e] hover:underline">Limpiar</button>
-                  )}
-                  {[
-                    { href: "/errands?tab=pedidos", label: "Pedidos", sub: `${fmtN(pendientes)} pendientes`, color: pendientes > 0 ? "bg-[#fdf6e9]" : "bg-[#f7faf5]" },
-                    { href: "/errands?tab=clientes", label: "Clientes", sub: `${fmtN(errandsData.totalClientes)} activos`, color: "bg-[#f7faf5]" },
-                    { href: "/errands?tab=pdv", label: "Puntos de venta", sub: `${fmtN(errandsData.totalPuntosVenta)} activos`, color: "bg-[#f7faf5]" },
-                  ].map((item) => (
-                    <Link key={item.href} href={item.href} className={`flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#e1e9dd] ${item.color} px-4 py-2 transition-all hover:border-[#2f8f4e] hover:shadow-sm lg:flex-1`}>
-                      <span className="whitespace-nowrap text-xs font-semibold text-[#14352a]">{item.label}</span>
-                      <span className="shrink-0 whitespace-nowrap rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-medium text-[#7a8794]">{item.sub}</span>
-                    </Link>
-                  ))}
-                </div>
-
-                {/* Fila 1: Estado de pedidos · Por punto de venta · Tendencia 14 días */}
-                <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-3">
-                  <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
-                    <h2 className="mb-3 text-sm font-semibold text-[#14352a]">Estado de pedidos</h2>
-                    {errandsData.totalPedidos === 0 ? (
-                      <div className="flex h-32 items-center justify-center text-sm text-[#7a8794]">Sin registros</div>
-                    ) : (
-                      <div className="flex items-center gap-4">
-                        <div className="w-32 shrink-0">
-                          <DonutChart
-                            centerLabel={fmtN(errandsData.totalPedidos)}
-                            centerSub="pedidos"
-                            segments={errandsData.porEstado.filter((e) => e.value > 0).map((e) => ({ label: e.label, value: e.value, color: ESTADO_COLOR_DONUT[e.label] ?? "#9aa4af" }))}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-1.5 text-xs">
-                          {errandsData.porEstado.filter((e) => e.value > 0).map((e) => (
-                            <div key={e.label} className="flex items-center gap-1.5">
-                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ESTADO_COLOR_DONUT[e.label] ?? "#9aa4af" }} />
-                              <span className="text-[#5f7a68]">{e.label}</span>
-                              <span className="ml-auto font-semibold tabular-nums text-[#14352a]">{fmtN(e.value)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
-                    <h2 className="mb-3 text-sm font-semibold text-[#14352a]">Pedidos por punto de venta</h2>
-                    {errandsData.porPdv.length === 0 ? (
-                      <div className="flex h-32 items-center justify-center text-sm text-[#7a8794]">Sin registros</div>
-                    ) : (
-                      <div className="flex flex-col gap-2.5">
-                        {errandsData.porPdv.slice(0, 8).map((d) => (
-                          <HBar key={d.label} label={d.label} value={d.value} max={errandsData.porPdv[0].value} color="#2f8f4e" />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-[#14352a]">Pedidos por día (14 días)</h2>
-                      <span className="text-xs text-[#7a8794]">total: {fmtN(errandsData.porDia.reduce((s, d) => s + d.value, 0))}</span>
-                    </div>
-                    {errandsData.porDia.every((d) => d.value === 0) ? (
-                      <div className="flex h-28 items-center justify-center text-sm text-[#7a8794]">Sin datos aún.</div>
-                    ) : (
-                      <SparkBars data={errandsData.porDia} />
-                    )}
-                  </div>
-                </div>
-
-                {/* Fila 2: Top clientes · Resumen operativo */}
-                <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-3">
-                  <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm lg:col-span-2">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-[#14352a]">Top 10 clientes</h2>
-                      <Link href="/errands?tab=clientes" className="text-[10px] font-medium text-[#2f8f4e] hover:underline">Ver clientes →</Link>
-                    </div>
-                    {errandsData.porCliente.length === 0 ? (
-                      <div className="flex h-32 items-center justify-center text-sm text-[#7a8794]">Sin registros</div>
-                    ) : (
-                      <div className="flex flex-col gap-2.5">
-                        {errandsData.porCliente.map((d) => (
-                          <HBar key={d.label} label={d.label} value={d.value} max={errandsData.porCliente[0].value} color="#1a5fb4" />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-2xl border border-[#e1e9dd] bg-white p-4 shadow-sm">
-                    <h2 className="mb-3 text-sm font-semibold text-[#14352a]">Resumen operativo</h2>
-                    <div className="grid grid-cols-2 gap-3 text-center text-xs text-[#7a8794]">
-                      <div><p className="text-lg font-bold text-[#14352a]">{fmtN(errandsData.totalPedidos)}</p><p>pedidos</p></div>
-                      <div><p className="text-lg font-bold text-[#14352a]">{fmtKg(errandsData.totalKilos)}</p><p>kg totales</p></div>
-                      <div><p className="text-lg font-bold text-[#14352a]">{errandsData.totalPuntosVenta}</p><p>PDV activos</p></div>
-                      <div><p className="text-lg font-bold text-[#14352a]">{errandsData.totalClientes}</p><p>clientes activos</p></div>
-                    </div>
-                    <Link href="/errands" className="mt-3 flex items-center justify-center rounded-lg border border-[#dfe4e0] bg-[#f7faf5] px-3 py-2 text-xs font-semibold text-[#2f8f4e] hover:border-[#2f8f4e]">Ir a Run Errands →</Link>
-                  </div>
-                </div>
-              </>
-            );
-          })()}
-
-          </div>
-        )
       ) : (
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
