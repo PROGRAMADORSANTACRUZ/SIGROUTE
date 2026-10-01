@@ -230,16 +230,21 @@ router.post("/reabrir-area", requirePermiso("programacion.reabrir_area"), async 
   }
 });
 
-// ── Carga de kilos por área desde un Excel de despacho real (hoja "Remisión") ──
+// ── Carga de kilos desde Excel: dos formatos reales distintos ──────────────
 // Reemplaza al viejo "Pegar desde Excel" (copiar/pegar celdas) por un botón
-// que sube el .xlsm/.xlsx directamente. Formato real (informe de desposte
-// Planta Santacruz): la hoja "Remisión" tiene un bloque de 7 columnas por
-// cliente ("DESPACHADO A: <nombre>" en el encabezado del bloque), con una
-// fila de productos (CODIGO/DESCRIPCION/KILOS/SOBRA/FALTA/%PARTIC) y una fila
-// final "TOTAL"/"TOTAL DESPACHADO" con el total de kg YA calculado por
-// cliente — se usa ese total directo (verificado que coincide exacto con la
-// suma manual de todas las filas de producto, y que la suma de todos los
-// clientes coincide con el "PESO EN FRIO" del lote completo).
+// que sube el .xlsm/.xlsx directamente. Hay DOS formatos reales en uso y el
+// botón debe aceptar cualquiera de los dos (se detecta solo por el nombre de
+// hoja, sin pedirle al usuario que diga cuál es):
+//  1) "Remisión" (informe de desposte Planta Santacruz): un bloque de 7
+//     columnas por cliente ("DESPACHADO A: <nombre>" en el encabezado del
+//     bloque), con una fila de productos y una fila final "TOTAL"/"TOTAL
+//     DESPACHADO" con el total de kg YA calculado — es de UNA sola área
+//     (el usuario elige cuál en el selector), porque el informe es de un
+//     solo producto (ej. Porcino).
+//  2) "Programación" (Excel de Programación Despacho D-Casa/D-Mega): una
+//     grilla por destino×categoría igual a la de esta misma pantalla, con
+//     TODAS las áreas en un solo archivo (Bovino, Víscera Bovino, Porcino,
+//     Víscera Porcino, Inversiones, TAT...) — no requiere elegir área.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 function normalizarTexto(s: unknown): string {
@@ -253,11 +258,12 @@ function normalizarTexto(s: unknown): string {
 
 interface BloqueCliente { col: number; nombre: string }
 
-// Ubica la hoja "Remisión" (o "Remision", sin acento) sin depender del nombre exacto.
-function hojaRemision(wb: XLSX.WorkBook): XLSX.WorkSheet {
-  const nombre = wb.SheetNames.find((n) => normalizarTexto(n) === "remision");
-  if (!nombre) throw new HttpError(400, "El archivo no tiene una hoja \"Remisión\"");
-  return wb.Sheets[nombre];
+// Ubica una hoja por su nombre normalizado (sin acentos/mayúsculas) sin
+// depender del nombre exacto; devuelve null si no existe (no truena: el
+// archivo puede traer el otro formato).
+function buscarHoja(wb: XLSX.WorkBook, nombreNormalizado: string): XLSX.WorkSheet | null {
+  const nombre = wb.SheetNames.find((n) => normalizarTexto(n) === nombreNormalizado);
+  return nombre ? wb.Sheets[nombre] : null;
 }
 
 // Extrae {cliente -> kg total despachado} de la hoja Remisión, buscando los
@@ -328,19 +334,146 @@ function emparejarCliente(
   return mejor ? { ...mejor, tipo: "substring" } : null;
 }
 
+// ── Formato 2: hoja "Programación" (Excel D-Casa/D-Mega) — una grilla con
+// TODAS las categorías por destino en un solo archivo. Mismo detector de
+// encabezados que el viejo "pegado inteligente" del frontend
+// (lib/pegarProgramacion.ts: D-Mega y D-Casa no usan el mismo orden de
+// columnas), portado aquí porque ahora se lee el archivo real en vez de
+// texto copiado del portapapeles.
+function categoriaDeEncabezadoProg(header: unknown): string | null {
+  const h = normalizarTexto(header);
+  if (!h) return null;
+  const esViscera = h.includes("viscera");
+  if (esViscera && h.includes("bovino")) return "viscera_bovino";
+  if (esViscera && (h.includes("porcino") || h.includes("procino"))) return "viscera_porcino";
+  if (h.includes("bovino")) return "bovino";
+  if (h.includes("porcino")) return "porcino";
+  if (h.includes("invers")) return "inversion";
+  if (h.includes("tat")) return "tat";
+  if (h.includes("otro")) return "otros";
+  return null;
+}
+function esEncabezadoCanastillasProg(header: unknown): boolean {
+  const h = normalizarTexto(header);
+  return h === "unds" || h === "und" || h === "can" || h === "canastilla" || h === "canastillas" || h === "caja" || h === "cajas";
+}
+function esEncabezadoIgnorableProg(header: unknown): boolean {
+  const h = normalizarTexto(header);
+  return h === "" || h === "*" || h === "total" || h === "kls" || h.includes("total reses") || h.includes("total cerdos");
+}
+function esEncabezadoDestinoProg(header: unknown): boolean {
+  const h = normalizarTexto(header);
+  return h.includes("destino") || h.includes("cliente") || h.includes("tienda") || h === "nombre";
+}
+function parseNumeroCeldaProg(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const s = String(v ?? "").trim();
+  if (!s) return 0;
+  const limpio = s.replace(/[^\d.,-]/g, "").replace(/,/g, "");
+  if (!limpio) return 0;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : 0;
+}
+
+interface FilaProgramacion { destino: string; valores: Record<string, number> }
+
+// Extrae {destino -> {klsBovino, canastillasBovino, klsPorcino, ...}} de la
+// hoja "Programación" completa (todas las categorías de una vez), buscando
+// los encabezados por texto (no por posición fija: D-Casa y D-Mega varían
+// el orden de columnas entre sí).
+function extraerProgramacion(sheet: XLSX.WorkSheet): { filas: FilaProgramacion[]; categorias: { clave: string; etiqueta: string }[] } {
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: "" });
+  if (rows.length === 0) throw new HttpError(400, "La hoja \"Programación\" está vacía");
+
+  // Se busca primero por columna de categoría (bovino/porcino/invers/tat/otro):
+  // es una señal mucho más específica que "destino", que puede dar falso
+  // positivo con el título ("PROGRAMACIÓN... MEGATIENDAS..." contiene "tienda").
+  let idxHeader = -1;
+  for (let i = 0; i < Math.min(rows.length, 4); i++) {
+    if (rows[i].some((c) => categoriaDeEncabezadoProg(c) !== null)) { idxHeader = i; break; }
+  }
+  if (idxHeader === -1) {
+    for (let i = 0; i < Math.min(rows.length, 4); i++) {
+      if (rows[i].some(esEncabezadoDestinoProg)) { idxHeader = i; break; }
+    }
+  }
+  if (idxHeader === -1) idxHeader = 0;
+  const header = rows[idxHeader].map((c) => String(c ?? "").replace(/\n/g, " "));
+  const subHeaderRaw = rows[idxHeader + 1];
+  const subHeader = subHeaderRaw && subHeaderRaw.some((c) => esEncabezadoCanastillasProg(c) || esEncabezadoIgnorableProg(c))
+    ? subHeaderRaw.map((c) => String(c ?? "").replace(/\n/g, " "))
+    : null;
+
+  let columnaDestinoIdx = header.findIndex(esEncabezadoDestinoProg);
+  if (columnaDestinoIdx === -1) {
+    columnaDestinoIdx = esEncabezadoIgnorableProg(header[0]) || /^\d+$/.test((header[0] ?? "").trim()) ? 1 : 0;
+  }
+
+  // Detecta, para cada columna del encabezado, si es "kls" de una categoría;
+  // luego busca su "can" pareja en las columnas siguientes, antes de la
+  // próxima columna de categoría. "KLS VÍSCERA" sin especie se asocia a la
+  // última especie (bovino/porcino) vista (igual que D-Casa en pegado).
+  const colKls: Record<string, number> = {};
+  const colCan: Record<string, number> = {};
+  const canUsados = new Set<number>();
+  let ultimaEspecie: "bovino" | "porcino" | null = null;
+  for (let i = 0; i < header.length; i++) {
+    let clave = categoriaDeEncabezadoProg(header[i]);
+    if (clave === "bovino" || clave === "porcino") ultimaEspecie = clave;
+    if (!clave) {
+      const h = normalizarTexto(header[i]);
+      const viscAmbigua = ultimaEspecie ? `viscera_${ultimaEspecie}` : null;
+      if (h.includes("viscera") && viscAmbigua && !(viscAmbigua in colKls)) clave = viscAmbigua;
+    }
+    if (!clave || clave in colKls) continue;
+    colKls[clave] = i;
+    for (let j = i + 1; j < header.length; j++) {
+      if (categoriaDeEncabezadoProg(header[j])) break;
+      if (canUsados.has(j)) continue;
+      const esCan = esEncabezadoCanastillasProg(header[j]) || (subHeader && esEncabezadoCanastillasProg(subHeader[j] ?? ""));
+      if (esCan) { colCan[clave] = j; canUsados.add(j); break; }
+    }
+  }
+  if (Object.keys(colKls).length === 0) throw new HttpError(400, "No se detectaron columnas de categoría en la hoja \"Programación\"");
+
+  const categorias = CATEGORIAS.filter((c) => c.clave in colKls).map((c) => ({ clave: c.clave, etiqueta: c.etiqueta }));
+
+  const filaDatosInicio = idxHeader + (subHeader ? 2 : 1);
+  const filas: FilaProgramacion[] = [];
+  for (let i = filaDatosInicio; i < rows.length; i++) {
+    const fila = rows[i];
+    const destino = String(fila[columnaDestinoIdx] ?? "").trim();
+    // La fila final "Totales"/"Total despachado" es un resumen, no un destino real.
+    if (!destino || normalizarTexto(destino).startsWith("total")) continue;
+    const valores: Record<string, number> = {};
+    for (const c of CATEGORIAS) {
+      const ik = colKls[c.clave];
+      const ic = colCan[c.clave];
+      if (ik != null) valores[c.kls] = parseNumeroCeldaProg(fila[ik]);
+      if (ic != null) valores[c.can] = parseNumeroCeldaProg(fila[ic]);
+    }
+    filas.push({ destino, valores });
+  }
+  return { filas, categorias };
+}
+
 // POST /api/planeacion/programacion/cargar-excel  (multipart: file + area)
 // Solo hace preview (parseo + cruce de clientes) — NO escribe en la BD. El
 // frontend aplica el resultado a la grilla en memoria (igual que el viejo
-// "Pegar desde Excel") y el usuario revisa y pulsa Guardar para persistir.
+// "Pegar desde Excel") y el usuario revisa y pulsa Guardar para persistir;
+// como varias áreas suben su propio Excel para el mismo día, el frontend
+// SUMA sobre lo que ya haya en la grilla en vez de sobreescribir (un cliente
+// puede aparecer cargado por más de un área/archivo el mismo día).
 router.post("/cargar-excel", requirePermiso("programacion.editar"), upload.single("file"), async (req, res, next) => {
   try {
     if (!req.file) throw new HttpError(400, "Falta el archivo");
-    const area = String(req.body?.area ?? "").trim();
-    const categoria = CATEGORIAS.find((c) => c.clave === area);
-    if (!categoria) throw new HttpError(400, "Área inválida");
 
     const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-    const totales = extraerTotalesRemision(hojaRemision(wb));
+    const hojaProg = buscarHoja(wb, "programacion");
+    const hojaRem = buscarHoja(wb, "remision");
+    if (!hojaProg && !hojaRem) {
+      throw new HttpError(400, "El archivo no tiene una hoja \"Remisión\" ni \"Programación\" reconocible");
+    }
 
     const clientesDb = await prisma.cliente.findMany({
       where: { activo: true },
@@ -350,6 +483,28 @@ router.post("/cargar-excel", requirePermiso("programacion.editar"), upload.singl
       .map((c) => ({ id: c.id, nombre: (c.cliente || c.nombreDireccion || "").trim() }))
       .filter((c) => c.nombre);
 
+    if (hojaProg) {
+      const { filas: filasProg, categorias } = extraerProgramacion(hojaProg);
+      const filas: { destino: string; clienteId: string | null; clienteNombre: string | null; tipo: string; valores: Record<string, number> }[] = [];
+      const sinMatch: string[] = [];
+      for (const f of filasProg) {
+        const match = emparejarCliente(f.destino, clientes);
+        if (match) {
+          filas.push({ destino: f.destino, clienteId: match.id, clienteNombre: match.nombre, tipo: match.tipo, valores: f.valores });
+        } else {
+          sinMatch.push(f.destino);
+          filas.push({ destino: f.destino, clienteId: null, clienteNombre: null, tipo: "sin_match", valores: f.valores });
+        }
+      }
+      res.json({ tipo: "programacion", categorias, filas, sinMatch });
+      return;
+    }
+
+    const area = String(req.body?.area ?? "").trim();
+    const categoria = CATEGORIAS.find((c) => c.clave === area);
+    if (!categoria) throw new HttpError(400, "Área inválida");
+
+    const totales = extraerTotalesRemision(hojaRem!);
     const filas: { destino: string; clienteId: string | null; clienteNombre: string | null; tipo: string; kg: number }[] = [];
     const sinMatch: string[] = [];
     for (const t of totales) {
@@ -362,7 +517,7 @@ router.post("/cargar-excel", requirePermiso("programacion.editar"), upload.singl
       }
     }
 
-    res.json({ area, campoKls: categoria.kls, filas, sinMatch });
+    res.json({ tipo: "remision", area, campoKls: categoria.kls, filas, sinMatch });
   } catch (err) {
     next(err);
   }

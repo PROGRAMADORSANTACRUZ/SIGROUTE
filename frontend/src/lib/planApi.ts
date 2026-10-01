@@ -122,18 +122,22 @@ export interface FilaCargaExcel {
   clienteId: string | null;
   clienteNombre: string | null;
   tipo: "exacto" | "singular" | "substring" | "sin_match";
-  kg: number;
+  kg?: number; // solo formato "remision" (una sola área)
+  valores?: Record<string, number>; // solo formato "programacion" (kls/can de todas las áreas)
 }
 export interface ResultadoCargaExcel {
-  area: string;
-  campoKls: string;
+  tipo: "remision" | "programacion";
+  area?: string; // solo "remision"
+  campoKls?: string; // solo "remision"
+  categorias?: { clave: string; etiqueta: string }[]; // solo "programacion"
   filas: FilaCargaExcel[];
   sinMatch: string[];
 }
 
-// Sube el Excel real de despacho (hoja "Remisión") y devuelve el cruce con
-// el maestro de Clientes — no escribe en la BD, el frontend aplica el
-// resultado a la grilla en memoria y el usuario guarda manualmente.
+// Sube el Excel real (hoja "Remisión" o "Programación", se detecta solo) y
+// devuelve el cruce con el maestro de Clientes — no escribe en la BD, el
+// frontend aplica el resultado a la grilla en memoria y el usuario guarda
+// manualmente. `area` solo se usa si el archivo resulta ser formato "Remisión".
 export async function cargarExcelProgramacion(area: string, file: File): Promise<ResultadoCargaExcel> {
   const formData = new FormData();
   formData.append("area", area);

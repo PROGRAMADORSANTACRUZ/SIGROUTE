@@ -161,7 +161,9 @@ export default function ProgramacionPage() {
 
   // Aplica lo detectado en el modal "Cargar Excel" a la grilla en memoria
   // (no guarda solo): el usuario revisa y luego pulsa Guardar, igual que si
-  // hubiera tecleado los valores a mano.
+  // hubiera tecleado los valores a mano. SUMA sobre lo que ya haya en la
+  // celda (no sobreescribe): varias áreas suben su propio Excel el mismo
+  // día y pueden traer al mismo cliente cargado por más de una de ellas.
   function aplicarPegado(r: ResultadoPegado) {
     if (!data) return;
     setValores((prev) => {
@@ -170,14 +172,14 @@ export default function ProgramacionPage() {
         if (!fila.destinoId) continue;
         const actual = { ...(next[fila.destinoId] ?? {}) };
         for (const [campo, valor] of Object.entries(fila.valores)) {
-          if (editableCols.has(campo)) actual[campo] = String(valor);
+          if (editableCols.has(campo)) actual[campo] = String((Number(actual[campo]) || 0) + (Number(valor) || 0));
         }
         next[fila.destinoId] = actual;
       }
       return next;
     });
     const n = r.filas.filter((f) => f.destinoId).length;
-    showToast(`${n} destino(s) actualizados en la grilla — revisa y pulsa Guardar.`, "success");
+    showToast(`${n} destino(s) sumados en la grilla — revisa y pulsa Guardar.`, "success");
     setPegarAbierto(false);
   }
 
