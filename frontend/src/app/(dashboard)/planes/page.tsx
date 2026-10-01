@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import {
   ApiError,
   agregarAPlan,
@@ -257,10 +256,44 @@ export default function DiagramaPage() {
   }
 
   // Excel con todo el diagrama visible (una hoja de resumen por vehículo/ruta
-  // + el detalle de remisiones), construido en el navegador (sin ir al backend).
-  function exportarExcel() {
-    const wb = XLSX.utils.book_new();
-    const resumen: (string | number)[][] = [["Placa", "Conductor", "Flota", "Ruta", "Remisiones", "Kg cargados", "Capacidad", "Precio flete", "$/kg"]];
+  // + el detalle de remisiones). Encabezados verdes/letras blancas y columnas
+  // anchas según el contenido real (sin wrap) para que ninguna fila quede
+  // partida — si una columna no cabe en pantalla, Excel scrollea en x.
+  async function exportarExcel() {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "SIGROUTE";
+    wb.created = new Date();
+
+    const VERDE = "FF2F8F4E";
+    const BLANCO = "FFFFFFFF";
+
+    function agregarHoja(nombre: string, headers: string[], filas: (string | number)[][]) {
+      const ws = wb.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: 1 }] });
+      const headerRow = ws.addRow(headers);
+      headerRow.height = 20;
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: BLANCO } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE } };
+        cell.alignment = { vertical: "middle", horizontal: "left" };
+      });
+      for (const fila of filas) {
+        ws.addRow(fila).height = 16;
+      }
+      // Ancho = el texto más largo de esa columna (encabezado incluido), sin
+      // wrap -> cada fila queda en una sola línea completa, nunca apachurrada.
+      headers.forEach((h, i) => {
+        let max = h.length;
+        for (const fila of filas) {
+          const len = String(fila[i] ?? "").length;
+          if (len > max) max = len;
+        }
+        ws.getColumn(i + 1).width = Math.min(Math.max(max + 2, 10), 60);
+      });
+      return ws;
+    }
+
+    const resumen: (string | number)[][] = [];
     for (const g of filtrados) {
       const ruta = nombreRutaGrupo(g.ordenes, g.vehiculo);
       const flete = g.vehiculo.precioFlete ? Number(g.vehiculo.precioFlete) : null;
@@ -270,18 +303,25 @@ export default function DiagramaPage() {
         capacidadEfectiva(g.vehiculo) ?? "", flete ?? "", flete && g.totalKg ? Number((flete / g.totalKg).toFixed(0)) : "",
       ]);
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), "Resumen");
+    agregarHoja("Resumen", ["Placa", "Conductor", "Flota", "Ruta", "Remisiones", "Kg cargados", "Capacidad", "Precio flete", "$/kg"], resumen);
 
-    const detalle: (string | number)[][] = [["Placa", "Ruta", "No. Orden", "Cliente", "Destino", "Kg", "Estado"]];
+    const detalle: (string | number)[][] = [];
     for (const g of filtrados) {
       const ruta = nombreRutaGrupo(g.ordenes, g.vehiculo);
       for (const r of consolidarRemisiones(g.ordenes)) {
         detalle.push([g.vehiculo.placa, ruta, r.numeroOrden, tc(r.cliente), tc(r.destino), Math.round(r.cantidadKg), r.enviado ? "Enviado" : "Pendiente"]);
       }
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detalle), "Detalle");
+    agregarHoja("Detalle", ["Placa", "Ruta", "No. Orden", "Cliente", "Destino", "Kg", "Estado"], detalle);
 
-    XLSX.writeFile(wb, `diagrama-${hoy()}.xlsx`);
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `diagrama-${hoy()}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // Mueve todas las líneas de una remisión a otro vehículo (o la quita si placa=null).

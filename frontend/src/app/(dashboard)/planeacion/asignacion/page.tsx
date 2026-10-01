@@ -215,17 +215,14 @@ export default function AsignacionPage() {
         actions={
           <>
             <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            <div className="flex flex-col items-end">
-              <button
-                onClick={preasignarFacturas}
-                disabled={preasignando}
-                className="inline-flex items-center gap-2 rounded-lg border border-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-[#2f8f4e] hover:bg-[#eef7ee] disabled:opacity-50"
-              >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                {preasignando ? "Preasignando…" : "Preasignar facturas"}
-              </button>
-              <span className="mt-0.5 text-[11px] text-[#7a8794]">Se preasignan en base a su geoposición</span>
-            </div>
+            <button
+              onClick={preasignarFacturas}
+              disabled={preasignando}
+              className="inline-flex items-center gap-2 rounded-lg border border-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-[#2f8f4e] hover:bg-[#eef7ee] disabled:opacity-50"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+              {preasignando ? "Preasignando…" : "Preasignar facturas"}
+            </button>
             {rutas.length < maxRutas ? (
               <button onClick={abrirCreacion} className="inline-flex items-center gap-2 rounded-lg bg-[#2f8f4e] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#277a42]">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
