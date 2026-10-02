@@ -1094,6 +1094,20 @@ router.post(
       const nEntregados = data.filter((d) => d.estado === "Entregado").length;
       const nRechazados = data.filter((d) => d.estado === "Rechazado").length;
       const nNoCreados = data.filter((d) => d.estado === "No Creado").length;
+
+      // Autodisparo del backfill de facturación (valor/CUFE/QR/firma/código de
+      // producto) para este mismo rango de fechas — best-effort: si Siesa
+      // falla o tarda, el import ya quedó guardado igual, no se bloquea la
+      // respuesta por esto (queda el job nocturno y el botón manual de respaldo).
+      let sincronizacionSiesa: Awaited<ReturnType<typeof sincronizarAgropecuaria>> | null = null;
+      if (isoDates.length > 0) {
+        try {
+          sincronizacionSiesa = await sincronizarAgropecuaria(isoDates[0], isoDates[isoDates.length - 1]);
+        } catch {
+          sincronizacionSiesa = null;
+        }
+      }
+
       res.status(201).json({
         importados: data.length,
         entregados: nEntregados,
@@ -1102,6 +1116,7 @@ router.post(
         noCreadas: nNoCreados,
         clientesAutoAsignados: nuevosConsecutivosPorCliente.size,
         sinCodigo,
+        sincronizacionSiesa,
       });
     } catch (err) {
       next(err);
@@ -1386,6 +1401,24 @@ async function buscarFacturaEnSiesa(
   return { documento, filas };
 }
 
+interface ResultadoFacturaTat {
+  numeroOrden: string;
+  cliente: string;
+  nit: string | null;
+  barrio: string | null;
+  destino: string;
+  direccion: string | null;
+  productos: { producto: string; kg: number; valor: number }[];
+  totalKg: number;
+  totalValor: number;
+  origen: string;
+  ruta: string | null;
+  vehiculo: string | null;
+  cufe: string | null;
+  qrTexto: string | null;
+  firmaDigital: string | null;
+}
+
 // Cruza UNA factura (ya filtrada a solo líneas de despacho) con el maestro de
 // clientes TAT, arma sus líneas de Orden y las guarda — compartido entre el
 // escaneo de una sola factura (`resolverFacturaTat`) y la carga masiva de
@@ -1396,9 +1429,20 @@ async function guardarFacturaTat(
   documento: string,
   filas: TatInvoice[],
   opts: { fecFacFallback: string; rutaBody: string | null; placaInicial?: string | null; cufeManual?: string | null; qrTextoManual?: string | null; firmaDigitalManual?: string | null }
-) {
+): Promise<ResultadoFacturaTat | { yaEnviada: true; numeroOrden: string; cliente: string }> {
   const nit = String(filas[0].cliente_factura ?? "").trim();
   const numeroOrden = String(filas[0].nro_documento ?? documento).trim();
+
+  // Si esta factura ya viajó con éxito a Drivin (vive en OrdenHistorico porque
+  // Orden se archiva/limpia a diario, ver limpiezaDiaria.ts), no se vuelve a
+  // crear como "Pendiente" — evita la confusión de que Siesa la devuelva de
+  // nuevo en un rango de fechas futuro y parezca una orden nueva sin asignar.
+  const yaEnviada = await prisma.ordenHistorico.findFirst({
+    where: { numeroOrden, distribucion: "TAT", tatOrigen: origen, enviadoDrivinEn: { not: null } },
+    select: { cliente: true },
+    orderBy: { archivadoEn: "desc" },
+  });
+  if (yaEnviada) return { yaEnviada: true, numeroOrden, cliente: yaEnviada.cliente };
 
   // Dirección/vendedor del maestro TAT por NIT (fallback si la factura no la
   // trae). El código del Cliente unificado es "NIT-sucursal": un mismo NIT
@@ -1578,7 +1622,7 @@ async function resolverFacturaTat(params: {
   }
   filas = filasDespacho;
 
-  return guardarFacturaTat(origen, documento, filas, {
+  const resultado = await guardarFacturaTat(origen, documento, filas, {
     fecFacFallback: fecFac,
     rutaBody,
     placaInicial: params.placaInicial,
@@ -1586,6 +1630,10 @@ async function resolverFacturaTat(params: {
     qrTextoManual: params.qrTexto,
     firmaDigitalManual: params.firmaDigital,
   });
+  if ("yaEnviada" in resultado) {
+    throw new HttpError(409, `La factura ${resultado.numeroOrden} (${resultado.cliente}) ya fue enviada a Drivin anteriormente — no se vuelve a cargar.`);
+  }
+  return resultado;
 }
 
 // POST /api/ordenes/factura  -> consulta UNA factura en apiconsulta (Siesa) y la
@@ -1634,11 +1682,16 @@ router.post("/factura-todas", requireAuth, requirePermiso("distrilog.ordenes.edi
     }
 
     const cargadas: { numeroOrden: string; cliente: string; totalKg: number }[] = [];
+    const omitidas: { numeroOrden: string; cliente: string }[] = [];
     const errores: { documento: string; error: string }[] = [];
     for (const [documento, filasDoc] of porDocumento) {
       try {
         const r = await guardarFacturaTat(origen, documento, filasDoc as TatInvoice[], { fecFacFallback: fecha, rutaBody });
-        cargadas.push({ numeroOrden: r.numeroOrden, cliente: r.cliente, totalKg: r.totalKg });
+        if ("yaEnviada" in r) {
+          omitidas.push({ numeroOrden: r.numeroOrden, cliente: r.cliente });
+        } else {
+          cargadas.push({ numeroOrden: r.numeroOrden, cliente: r.cliente, totalKg: r.totalKg });
+        }
       } catch (err) {
         errores.push({ documento, error: err instanceof HttpError ? err.message : "Error al procesar" });
       }
@@ -1650,6 +1703,10 @@ router.post("/factura-todas", requireAuth, requirePermiso("distrilog.ordenes.edi
       totalRecogidaDescartadas: todas.length - despacho.length,
       cargadas: cargadas.length,
       facturas: cargadas,
+      // Ya habían sido enviadas a Drivin en un día anterior (ver OrdenHistorico)
+      // -- se omiten a propósito, no cuentan como error.
+      omitidasYaEnviadas: omitidas.length,
+      omitidas,
       errores,
     });
   } catch (err) {
@@ -1670,92 +1727,119 @@ function numeroSiesaDeDocumento(nroDocumento: string): string {
   return /FE-0*(\d+)/.exec(String(nroDocumento ?? ""))?.[1] ?? "";
 }
 
-// POST /api/ordenes/sincronizar-agropecuaria -> completa cufe/qr/firma
-// digital/nit/valor de las facturas de Grandes Superficies (Bovino/Porcino,
-// cargadas por Excel y por eso sin esos datos) buscándolas en Siesa por su
-// número real (numeroOrden sin el prefijo B/P que le agrega este sistema).
-// NO toca kg/producto (la planificación de despacho sigue viniendo del
-// Excel) — solo agrega la info de facturación que Siesa sí tiene.
-// body: { fecha, fechaFin } — rango donde buscar en Siesa (la fecha de
-// FACTURACIÓN real puede ser distinta a la fecha del pedido en el Excel).
+// Completa cufe/qr/firma digital/nit/valor/código de producto de las
+// facturas de Grandes Superficies (Bovino/Porcino, cargadas por Excel y por
+// eso sin esos datos) buscándolas en Siesa por su número real (numeroOrden
+// sin el prefijo B/P que le agrega este sistema). NO toca kg/producto (la
+// planificación de despacho sigue viniendo del Excel) — solo agrega la info
+// de facturación que Siesa sí tiene. Compartida por el endpoint manual, el
+// autodisparo tras `/import` y el job nocturno de respaldo (ver jobs/sincronizarAgropecuariaDiaria.ts).
+export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
+  const [lineasSiesa, ordenesLocales] = await Promise.all([
+    fetchFacturasRango("AGROPECUARIA", fecha, fechaFin),
+    prisma.orden.findMany({
+      where: { distribucion: "AGROPECUARIA", OR: [{ cufe: null }, { productoCodigo: null }] },
+      select: { id: true, numeroOrden: true, cantidadKg: true, nit: true, direccion: true, productoCodigo: true },
+    }),
+  ]);
+  const despacho = lineasSiesa.filter((f) => esDespacho(f.pedido_notas));
+
+  const siesaPorNumero = new Map<string, TatInvoiceRaw[]>();
+  for (const f of despacho) {
+    const num = numeroSiesaDeDocumento(String(f.nro_documento ?? ""));
+    if (!num) continue;
+    const arr = siesaPorNumero.get(num) ?? [];
+    arr.push(f);
+    siesaPorNumero.set(num, arr);
+  }
+
+  const localesPorNumero = new Map<string, typeof ordenesLocales>();
+  for (const o of ordenesLocales) {
+    const num = numeroBaseDeOrden(o.numeroOrden);
+    const arr = localesPorNumero.get(num) ?? [];
+    arr.push(o);
+    localesPorNumero.set(num, arr);
+  }
+
+  let facturasEncontradas = 0;
+  let ordenesActualizadas = 0;
+  const sinFactura: string[] = [];
+  for (const [num, locales] of localesPorNumero) {
+    const filas = siesaPorNumero.get(num);
+    if (!filas || filas.length === 0) {
+      sinFactura.push(locales[0].numeroOrden);
+      continue;
+    }
+    facturasEncontradas++;
+    const nit = String(filas[0].cliente_factura ?? "").trim() || null;
+    const direccionSiesa = String(filas[0].direccion_sucursal ?? "").trim() || null;
+    const cufe = String(filas[0].cufe ?? "").trim().slice(0, 100) || null;
+    const qrTexto = String(filas[0].qr_code_url ?? "").trim().slice(0, 2000) || null;
+    const firmaDigital = String(filas[0].firma_digital ?? "").trim().slice(0, 4000) || null;
+    const totalValorFactura = filas.reduce((s, f) => s + (Number(f.valor_subtotal) || 0), 0);
+    const totalKgLocal = locales.reduce((s, o) => s + o.cantidadKg, 0);
+
+    // Código de producto: SÍ hace falta emparejar línea a línea (a
+    // diferencia del valor, que solo se reparte proporcional) — se asocia
+    // cada línea local con la fila de Siesa de peso (cantidad_inv) más
+    // parecido, sin repetir ninguna fila dos veces. Best-effort: las
+    // descripciones de producto nunca calzan 1:1 (Excel vs Siesa), pero el
+    // peso sí es un buen proxy cuando la factura trae varios productos.
+    const filasDisponibles = [...filas];
+    const localesPorPeso = [...locales].sort((a, b) => b.cantidadKg - a.cantidadKg);
+    for (const o of localesPorPeso) {
+      // El valor se reparte proporcional al peso de cada línea local: Siesa
+      // factura por producto con SU PROPIA descripción (no calza 1:1 con la
+      // del Excel), así que no hay forma exacta de emparejar línea a línea
+      // — esto sí deja el TOTAL de la factura correcto en la suma.
+      const valor = totalKgLocal > 0 ? Math.round((totalValorFactura * (o.cantidadKg / totalKgLocal)) * 100) / 100 : 0;
+
+      let mejorIdx = -1;
+      let mejorDif = Infinity;
+      for (let i = 0; i < filasDisponibles.length; i++) {
+        const dif = Math.abs((Number(filasDisponibles[i].cantidad_inv) || 0) - o.cantidadKg);
+        if (dif < mejorDif) { mejorDif = dif; mejorIdx = i; }
+      }
+      const filaElegida = mejorIdx >= 0 ? filasDisponibles.splice(mejorIdx, 1)[0] : null;
+      const productoCodigo = filaElegida ? codigoProductoTat(String(filaElegida.tipo_comercial ?? "")) : null;
+
+      await prisma.orden.update({
+        where: { id: o.id },
+        data: {
+          valor,
+          cufe,
+          qrTexto,
+          firmaDigital,
+          ...(productoCodigo && !o.productoCodigo ? { productoCodigo } : {}),
+          ...(nit && !o.nit ? { nit } : {}),
+          ...(direccionSiesa && !o.direccion ? { direccion: direccionSiesa } : {}),
+        },
+      });
+      ordenesActualizadas++;
+    }
+  }
+
+  return {
+    rangoConsultado: { fecha, fechaFin },
+    facturasBuscadas: localesPorNumero.size,
+    facturasEncontradas,
+    ordenesActualizadas,
+    sinFactura,
+  };
+}
+
+// POST /api/ordenes/sincronizar-agropecuaria -> dispara sincronizarAgropecuaria()
+// manualmente. body: { fecha, fechaFin } — rango donde buscar en Siesa (la
+// fecha de FACTURACIÓN real puede ser distinta a la fecha del pedido en el
+// Excel). Desde 2026-10-02 esto también corre SOLO justo después de `/import`
+// y en un job nocturno de respaldo — este endpoint manual queda para forzar
+// una pasada extra si hace falta (ej. Siesa tardó en aprobar el CUFE).
 router.post("/sincronizar-agropecuaria", requireAuth, requirePermiso("distrilog.ordenes.editar"), async (req, res, next) => {
   try {
     const fecha = String(req.body?.fecha ?? "").trim().slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new HttpError(400, "Fecha inválida");
     const fechaFin = String(req.body?.fechaFin ?? fecha).trim().slice(0, 10) || fecha;
-
-    const [lineasSiesa, ordenesLocales] = await Promise.all([
-      fetchFacturasRango("AGROPECUARIA", fecha, fechaFin),
-      prisma.orden.findMany({
-        where: { distribucion: "AGROPECUARIA", cufe: null },
-        select: { id: true, numeroOrden: true, cantidadKg: true, nit: true, direccion: true },
-      }),
-    ]);
-    const despacho = lineasSiesa.filter((f) => esDespacho(f.pedido_notas));
-
-    const siesaPorNumero = new Map<string, TatInvoiceRaw[]>();
-    for (const f of despacho) {
-      const num = numeroSiesaDeDocumento(String(f.nro_documento ?? ""));
-      if (!num) continue;
-      const arr = siesaPorNumero.get(num) ?? [];
-      arr.push(f);
-      siesaPorNumero.set(num, arr);
-    }
-
-    const localesPorNumero = new Map<string, typeof ordenesLocales>();
-    for (const o of ordenesLocales) {
-      const num = numeroBaseDeOrden(o.numeroOrden);
-      const arr = localesPorNumero.get(num) ?? [];
-      arr.push(o);
-      localesPorNumero.set(num, arr);
-    }
-
-    let facturasEncontradas = 0;
-    let ordenesActualizadas = 0;
-    const sinFactura: string[] = [];
-    for (const [num, locales] of localesPorNumero) {
-      const filas = siesaPorNumero.get(num);
-      if (!filas || filas.length === 0) {
-        sinFactura.push(locales[0].numeroOrden);
-        continue;
-      }
-      facturasEncontradas++;
-      const nit = String(filas[0].cliente_factura ?? "").trim() || null;
-      const direccionSiesa = String(filas[0].direccion_sucursal ?? "").trim() || null;
-      const cufe = String(filas[0].cufe ?? "").trim().slice(0, 100) || null;
-      const qrTexto = String(filas[0].qr_code_url ?? "").trim().slice(0, 2000) || null;
-      const firmaDigital = String(filas[0].firma_digital ?? "").trim().slice(0, 4000) || null;
-      const totalValorFactura = filas.reduce((s, f) => s + (Number(f.valor_subtotal) || 0), 0);
-      const totalKgLocal = locales.reduce((s, o) => s + o.cantidadKg, 0);
-
-      for (const o of locales) {
-        // El valor se reparte proporcional al peso de cada línea local: Siesa
-        // factura por producto con SU PROPIA descripción (no calza 1:1 con la
-        // del Excel), así que no hay forma exacta de emparejar línea a línea
-        // — esto sí deja el TOTAL de la factura correcto en la suma.
-        const valor = totalKgLocal > 0 ? Math.round((totalValorFactura * (o.cantidadKg / totalKgLocal)) * 100) / 100 : 0;
-        await prisma.orden.update({
-          where: { id: o.id },
-          data: {
-            valor,
-            cufe,
-            qrTexto,
-            firmaDigital,
-            ...(nit && !o.nit ? { nit } : {}),
-            ...(direccionSiesa && !o.direccion ? { direccion: direccionSiesa } : {}),
-          },
-        });
-        ordenesActualizadas++;
-      }
-    }
-
-    res.json({
-      rangoConsultado: { fecha, fechaFin },
-      facturasBuscadas: localesPorNumero.size,
-      facturasEncontradas,
-      ordenesActualizadas,
-      sinFactura,
-    });
+    res.json(await sincronizarAgropecuaria(fecha, fechaFin));
   } catch (err) {
     next(err);
   }

@@ -412,6 +412,10 @@ export interface FacturasTodasResult {
   totalRecogidaDescartadas: number;
   cargadas: number;
   facturas: { numeroOrden: string; cliente: string; totalKg: number }[];
+  // Ya hab\u00edan sido enviadas a Drivin en un d\u00eda anterior (ver OrdenHistorico) \u2014
+  // se omiten a prop\u00f3sito para no confundirlas con \u00f3rdenes nuevas.
+  omitidasYaEnviadas: number;
+  omitidas: { numeroOrden: string; cliente: string }[];
   errores: { documento: string; error: string }[];
 }
 

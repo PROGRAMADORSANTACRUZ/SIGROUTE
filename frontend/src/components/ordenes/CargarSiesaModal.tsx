@@ -115,6 +115,14 @@ export default function CargarSiesaModal({
                   <p className="mt-1 text-xs text-[#7a8794]">{resultado.totalRecogidaDescartadas} línea(s) de recogida descartada(s).</p>
                 )}
               </div>
+              {resultado.omitidasYaEnviadas > 0 && (
+                <div className="rounded-xl border border-[#dfe4e0] bg-[#f4f6f3] p-3 text-sm text-[#45505e]">
+                  <p className="font-medium">{resultado.omitidasYaEnviadas} factura(s) ya enviada(s) a Drivin antes — omitidas:</p>
+                  <ul className="mt-1 max-h-32 list-disc overflow-auto pl-5">
+                    {resultado.omitidas.map((o, i) => <li key={i}>{o.numeroOrden} · {o.cliente}</li>)}
+                  </ul>
+                </div>
+              )}
               {resultado.errores.length > 0 && (
                 <div className="rounded-xl border border-[#f0c4c1] bg-[#fbeceb] p-3 text-sm text-[#b3261e]">
                   <p className="font-medium">{resultado.errores.length} factura(s) con error:</p>
