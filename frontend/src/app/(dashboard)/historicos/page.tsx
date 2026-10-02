@@ -11,6 +11,7 @@ import {
 } from "@/lib/planApi";
 import { docRI, docRIT, imprimirDocumento } from "@/lib/planillaDocs";
 import { dlLabel } from "@/lib/utils";
+import { FiltroRangoFecha, diasAtras } from "@/components/FiltroFecha";
 
 const fmtKg = (n: number) =>
   n.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -174,14 +175,7 @@ function VistaPlanillas() {
       <div className="flex flex-col overflow-hidden rounded-2xl border border-[#e1e9dd] bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eceef0] px-4 py-3">
           <SearchInput value={buscar} onChange={setBuscar} placeholder="Buscar consecutivo, placa, conductor, ruta…" className="w-full sm:w-72" />
-          <div className="flex items-center gap-2 text-sm">
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Desde <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Hasta <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-          </div>
+          <FiltroRangoFecha desde={desde} hasta={hasta} onChange={(d, h) => { setDesde(d); setHasta(h); }} compacto />
         </div>
 
         {loading ? (
@@ -328,8 +322,10 @@ function VistaEjecutadas() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [buscar, setBuscar] = useState("");
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
+  // Mismo rango de 30 días que ya aplicaba el backend por defecto, pero ahora
+  // visible en los inputs (antes quedaba oculto detrás de un campo en blanco).
+  const [desde, setDesde] = useState(() => diasAtras(29));
+  const [hasta, setHasta] = useState(() => diasAtras(0));
   const [expandido, setExpandido] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -371,12 +367,7 @@ function VistaEjecutadas() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eceef0] px-4 py-3">
           <SearchInput value={buscar} onChange={setBuscar} placeholder="Buscar placa, usuario, N° orden, cliente…" className="w-full sm:w-72" />
           <div className="flex items-center gap-2 text-sm">
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Desde <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Hasta <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
+            <FiltroRangoFecha desde={desde} hasta={hasta} onChange={(d, h) => { setDesde(d); setHasta(h); }} compacto />
           </div>
         </div>
 
@@ -483,8 +474,8 @@ function VistaPlaneacion() {
   const [dias, setDias] = useState<HistoricoPlaneacionDia[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
+  const [desde, setDesde] = useState(() => diasAtras(29));
+  const [hasta, setHasta] = useState(() => diasAtras(0));
   const [expandida, setExpandida] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -523,14 +514,7 @@ function VistaPlaneacion() {
 
       <div className="flex flex-col overflow-hidden rounded-2xl border border-[#e1e9dd] bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-end gap-3 border-b border-[#eceef0] px-4 py-3">
-          <div className="flex items-center gap-2 text-sm">
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Desde <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-            <label className="flex items-center gap-1.5 text-[#7a8794]">
-              Hasta <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-          </div>
+          <FiltroRangoFecha desde={desde} hasta={hasta} onChange={(d, h) => { setDesde(d); setHasta(h); }} compacto />
         </div>
 
         {loading ? (

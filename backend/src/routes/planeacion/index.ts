@@ -12,6 +12,7 @@ import cambiosRouter from "./cambios";
 import distProduccionRouter from "./distProduccion";
 import simuladorRouter from "./simulador";
 import preplanificacionRouter from "./preplanificacion";
+import indicadoresRouter from "./indicadores";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use("/cambios", cambiosRouter);
 router.use("/distribucion-produccion", distProduccionRouter);
 router.use("/simulador", simuladorRouter);
 router.use("/preplanificacion", preplanificacionRouter);
+router.use("/indicadores", indicadoresRouter);
 
 export default router;

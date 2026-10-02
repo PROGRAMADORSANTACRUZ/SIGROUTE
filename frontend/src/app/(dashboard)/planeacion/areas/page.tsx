@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import { ApiError } from "@/lib/api";
 import { descargarReporte, getAreasCarga, setEstadoAreaCarga } from "@/lib/planApi";
 import { usePermiso } from "@/lib/permisos";
+import { FiltroFechaUnica } from "@/components/FiltroFecha";
 
 type Estado = "PENDIENTE" | "PROCESO" | "CARGADA";
 const ESTADOS: Estado[] = ["PENDIENTE", "PROCESO", "CARGADA"];
@@ -89,7 +90,7 @@ export default function AreasParaCargarPage() {
         actions={
           <div className="flex items-center gap-2">
             {!puedeConfirmar && <SoloLecturaBadge />}
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
+            <FiltroFechaUnica value={fecha} onChange={setFecha} tamano="md" />
             <button onClick={exportar} disabled={exportando} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3] disabled:opacity-60">
               {IconDownload} {exportando ? "Generando…" : "Exportar"}
             </button>

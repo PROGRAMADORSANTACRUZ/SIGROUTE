@@ -105,6 +105,12 @@ const clipboardIcon = (
   </svg>
 );
 
+const barChartIcon = (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" />
+  </svg>
+);
+
 const gearIcon = (
   <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -167,6 +173,7 @@ const navGroups: NavGroup[] = [
       { href: "/configuracion/roles", label: "Roles y permisos", icon: gearIcon },
       { href: "/configuracion/auditoria", label: "Auditoría", icon: clipboardIcon },
       { href: "/configuracion/reportes", label: "Reportes", icon: historyIcon },
+      { href: "/configuracion/indicadores", label: "Indicadores", icon: barChartIcon },
       { href: "/configuracion/clientes", label: "Clientes", icon: clientesIcon },
       { href: "/configuracion/vehiculos", label: "Vehículos", icon: truckIcon },
       { href: "/configuracion/conductores", label: "Conductores", icon: usersIcon },

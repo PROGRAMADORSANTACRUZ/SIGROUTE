@@ -23,6 +23,7 @@ import { docNovedad, imprimirNovedad } from "@/lib/novedadDoc";
 import { dlLabel, rnLabel } from "@/lib/utils";
 import SoloLecturaBadge from "@/components/SoloLecturaBadge";
 import { usePermiso } from "@/lib/permisos";
+import { FiltroRangoFecha } from "@/components/FiltroFecha";
 
 const NIVEL_ESTADOS: NivelEstado[] = ["Sin Novedad", "Con Novedad", "Doc.Pendiente", "Reenvio", "Rechazado", "Parcial Con Novedad"];
 // Estados que se muestran como tarjetas de estadística (incluye los que llegan de Drivin).
@@ -478,30 +479,7 @@ export default function NivelServicioPage() {
               {syncing ? "Sincronizando…" : syncMsg ? "Reintentar Drivin" : "Sync Drivin"}
             </button>
           )}
-          <label className="flex items-center gap-1.5 text-sm text-[#7a8794]">
-            Desde
-            <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-          </label>
-          <label className="flex items-center gap-1.5 text-sm text-[#7a8794]">
-            Hasta
-            <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-          </label>
-          <div className="flex items-center gap-1">
-            {[
-              { label: "Hoy", d: fechaHoy(), h: fechaHoy() },
-              { label: "Ayer", d: fechaAyer(), h: fechaAyer() },
-              { label: "7 días", d: fechaHace(6), h: fechaHoy() },
-              { label: "30 días", d: fechaHace(29), h: fechaHoy() },
-            ].map((p) => {
-              const activo = desde === p.d && hasta === p.h;
-              return (
-                <button key={p.label} onClick={() => { setDesde(p.d); setHasta(p.h); }}
-                  className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${activo ? "border-[#2f8f4e] bg-[#e8f3e2] text-[#2f8f4e]" : "border-[#dfe4e0] bg-white text-[#45505e] hover:bg-[#f4f6f3]"}`}>
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
+          <FiltroRangoFecha desde={desde} hasta={hasta} onChange={(d, h) => { setDesde(d); setHasta(h); }} compacto />
         </div>
       </header>
 

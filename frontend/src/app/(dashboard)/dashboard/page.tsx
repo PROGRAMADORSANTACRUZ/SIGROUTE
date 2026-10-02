@@ -20,16 +20,11 @@ import { PageLoader } from "@/components/Loading";
 import EmptyState from "@/components/EmptyState";
 import { IconRuta } from "@/components/icons";
 import { usePermiso } from "@/lib/permisos";
+import { FiltroRangoFecha, FiltroFechaUnica, diasAtras } from "@/components/FiltroFecha";
 
 // -"€-"€ Formatters -"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€-"€
 const fmtKg = (n: number) => n.toLocaleString("es-CO", { maximumFractionDigits: 0 });
 const fmtN  = (n: number) => n.toLocaleString("es-CO");
-
-function diasAtras(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-}
 
 // Compara una fecha (ISO datetime o yyyy-mm-dd) contra un rango [desde, hasta] inclusive.
 function enRango(fechaOIso: string, desde: string, hasta: string): boolean {
@@ -519,34 +514,13 @@ function DashboardPageInner() {
           <div className="flex flex-col gap-2.5">
 
           {/* Filtro de fechas: aplica a planillas/novedades (órdenes vivas son estado actual, no filtran por fecha) */}
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#e1e9dd] bg-white px-3 py-2">
-            <span className="text-xs font-medium text-[#7a8794]">Planillas y novedades:</span>
-            <label className="flex items-center gap-1.5 text-xs text-[#7a8794]">
-              Desde
-              <input type="date" value={ejecDesde} onChange={(e) => setEjecDesde(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1 text-xs text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-[#7a8794]">
-              Hasta
-              <input type="date" value={ejecHasta} onChange={(e) => setEjecHasta(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-2 py-1 text-xs text-[#14352a] outline-none focus:border-[#2f8f4e]" />
-            </label>
-            <div className="flex items-center gap-1">
-              {[
-                { label: "Hoy", d: diasAtras(0), h: diasAtras(0) },
-                { label: "Ayer", d: diasAtras(1), h: diasAtras(1) },
-                { label: "7 días", d: diasAtras(6), h: diasAtras(0) },
-                { label: "30 días", d: diasAtras(29), h: diasAtras(0) },
-              ].map((p) => {
-                const activo = ejecDesde === p.d && ejecHasta === p.h;
-                return (
-                  <button key={p.label} onClick={() => { setEjecDesde(p.d); setEjecHasta(p.h); }}
-                    className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${activo ? "border-[#2f8f4e] bg-[#e8f3e2] text-[#2f8f4e]" : "border-[#dfe4e0] bg-white text-[#45505e] hover:bg-[#f4f6f3]"}`}>
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
-            <span className="ml-auto text-[11px] text-[#9aa4af]">Órdenes activas: estado en vivo (no aplica rango)</span>
-          </div>
+          <FiltroRangoFecha
+            desde={ejecDesde}
+            hasta={ejecHasta}
+            onChange={(d, h) => { setEjecDesde(d); setEjecHasta(h); }}
+            etiqueta="Planillas y novedades:"
+            nota="Órdenes activas: estado en vivo (no aplica rango)"
+          />
 
           {/* Row 1: KPIs principales */}
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
@@ -849,12 +823,7 @@ function DashboardPageInner() {
 
           {/* Fila 0: Accesos rápidos */}
           <div className="nice-scroll flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-            <input
-              type="date"
-              value={planFecha}
-              onChange={(e) => setPlanFecha(e.target.value)}
-              className="shrink-0 rounded-full border border-[#dfe4e0] bg-white px-3.5 py-2 text-xs font-medium text-[#14352a] outline-none focus:border-[#2f8f4e]"
-            />
+            <FiltroFechaUnica value={planFecha} onChange={setPlanFecha} />
             {[
               { href: "/planeacion/programacion", label: "Planificación", sub: `${resumenPlan?.conteos.destinos ?? 0} destinos hoy`, color: "bg-[#f7faf5]" },
               { href: "/planeacion/asignacion", label: "Preasignación", sub: `${resumenPlan?.conteos.rutas ?? 0} rutas`, color: "bg-[#f7faf5]" },

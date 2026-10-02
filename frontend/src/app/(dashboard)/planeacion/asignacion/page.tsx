@@ -11,6 +11,7 @@ import { ApiError, getRutasFlete } from "@/lib/api";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useConfirm } from "@/components/ui/ConfirmProvider";
 import { IconLock, IconLockOpen, IconPencil } from "@/components/icons";
+import { FiltroFechaUnica } from "@/components/FiltroFecha";
 
 interface RutaRow {
   id: number; numeroRuta: number; horaCargue: string | null; vehiculo: string | null; conductor: string | null;
@@ -214,7 +215,7 @@ export default function AsignacionPage() {
         subtitle="Asigna vehículo, conductor, destinos y auxiliares a cada ruta del día."
         actions={
           <>
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
+            <FiltroFechaUnica value={fecha} onChange={setFecha} tamano="md" />
             <button
               onClick={preasignarFacturas}
               disabled={preasignando}

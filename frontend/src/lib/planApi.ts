@@ -108,6 +108,55 @@ export const getHistoricoPlaneacion = (params: { desde?: string; hasta?: string 
   return req<HistoricoPlaneacionDia[]>(`/dashboard/historico-planeacion?${qs}`);
 };
 
+// ── Indicadores (tiempos de cargue, SLA novedades, costo de flete) ───────
+function qsRango(params: { desde?: string; hasta?: string }): string {
+  const qs = new URLSearchParams();
+  if (params.desde) qs.set("desde", params.desde);
+  if (params.hasta) qs.set("hasta", params.hasta);
+  return qs.toString();
+}
+
+export interface IndicadorCargueCiclo { fecha: string; numeroRuta: number | null; placa: string | null; area: string; inicio: string; fin: string; duracionMin: number; usuario: string | null }
+export interface IndicadorCargueArea { area: string; ciclos: number; duracionPromedioMin: number; duracionP90Min: number }
+export interface IndicadorCargueReapertura { rutaId: number; numeroRuta: number; placa: string | null; reaperturas: number }
+export interface IndicadorCargueSerie { fecha: string; duracionPromedioMin: number; ciclos: number }
+export interface IndicadoresCargue {
+  desde: string; hasta: string;
+  resumen: { ciclos: number; duracionPromedioMin: number; duracionP90Min: number; reaperturas: number };
+  serie: IndicadorCargueSerie[];
+  rankingAreas: IndicadorCargueArea[];
+  rankingReaperturas: IndicadorCargueReapertura[];
+  detalle: IndicadorCargueCiclo[];
+}
+export const getIndicadoresCargue = (params: { desde?: string; hasta?: string }) =>
+  req<IndicadoresCargue>(`/indicadores/cargue?${qsRango(params)}`);
+
+export interface IndicadorNovedadesSerie { fecha: string; creadas: number; resueltas: number }
+export interface IndicadorConteo { valor: string; cantidad: number }
+export interface IndicadoresNovedades {
+  desde: string; hasta: string;
+  resumen: { total: number; reales: number; abiertas: number; resueltas: number; tiempoResolucionPromedioMin: number; tiempoResolucionP90Min: number };
+  antiguedadAbiertas: { "0-1d": number; "1-3d": number; "3-7d": number; "7d+": number };
+  serie: IndicadorNovedadesSerie[];
+  topMotivos: IndicadorConteo[];
+  topResponsabilidad: IndicadorConteo[];
+  topPlacas: IndicadorConteo[];
+  topClientes: IndicadorConteo[];
+}
+export const getIndicadoresNovedades = (params: { desde?: string; hasta?: string }) =>
+  req<IndicadoresNovedades>(`/indicadores/novedades?${qsRango(params)}`);
+
+export interface IndicadorFleteSerie { fecha: string; costo: number; kg: number; costoPorKg: number }
+export interface IndicadorFleteRuta { ruta: string; envios: number; costoTotal: number; kgTotal: number; costoPorKg: number; costoPorKgIdeal: number }
+export interface IndicadoresCostoFlete {
+  desde: string; hasta: string;
+  resumen: { envios: number; costoTotal: number; kgTotal: number; costoPorKgPromedio: number };
+  serie: IndicadorFleteSerie[];
+  rankingRutas: IndicadorFleteRuta[];
+}
+export const getIndicadoresCostoFlete = (params: { desde?: string; hasta?: string }) =>
+  req<IndicadoresCostoFlete>(`/indicadores/costo-flete?${qsRango(params)}`);
+
 // ── Pre-planificación (facturas TAT agrupadas por ciudad o barrio) ────────
 export interface PreplanProducto { tipoComercial: string; kg: number; valor: number }
 export interface PreplanDocumento {

@@ -12,6 +12,7 @@ import { useConfirm } from "@/components/ui/ConfirmProvider";
 import SearchInput from "@/components/SearchInput";
 import CargarExcelModal from "@/components/planeacion/CargarExcelModal";
 import type { ResultadoPegado } from "@/lib/pegarProgramacion";
+import { FiltroFechaUnica } from "@/components/FiltroFecha";
 
 const CANASTILLA_KG = 1.9; // cada canastilla suma 1.9 kg al total (igual que el original)
 const POR_PAGINA = 50;
@@ -202,7 +203,7 @@ export default function ProgramacionPage() {
         subtitle="Kilos y canastillas por destino y categoría para la fecha seleccionada."
         actions={
           <>
-            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="rounded-lg border border-[#dfe4e0] bg-white px-3 py-2.5 text-sm text-[#14352a] outline-none focus:border-[#2f8f4e]" />
+            <FiltroFechaUnica value={fecha} onChange={setFecha} tamano="md" />
             {data?.canEditar && (
               <button onClick={() => setPegarAbierto(true)} className="inline-flex items-center gap-2 rounded-lg border border-[#dfe4e0] bg-white px-4 py-2.5 text-sm font-medium text-[#45505e] hover:bg-[#f4f6f3]">
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>

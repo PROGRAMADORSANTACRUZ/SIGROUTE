@@ -37,6 +37,7 @@ const PERMISOS: [string, string][] = [
   ["dashboard.ver", "Acceder al Dashboard de Programación"],
   ["reportes.ver", "Acceder al módulo de Reportes"],
   ["reportes.exportar", "Exportar reportes a Excel"],
+  ["indicadores.ver", "Acceder a Indicadores (tiempos de cargue, SLA novedades, costo de flete)"],
   ["auditoria.ver", "Acceder al Log de Auditoría"],
   ["distribucion.ver", "Acceder a Distribución Producción (previsualizar / exportar)"],
   ["distribucion.editar", "Guardar y ajustar la distribución"],
@@ -96,6 +97,7 @@ const OPERADOR_CLAVES = [
   "distrilog.config.ver",
   "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
   "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
+  "indicadores.ver",
 ];
 
 const CONSULTA_CLAVES = [
@@ -105,6 +107,7 @@ const CONSULTA_CLAVES = [
   "distrilog.ordenes.ver", "distrilog.historicos.ver", "distrilog.nivel_servicio.ver",
   "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
   "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
+  "indicadores.ver",
 ];
 
 // Solo ve "Áreas para Cargar" (en qué puerto/área debe cargar cada vehículo) --

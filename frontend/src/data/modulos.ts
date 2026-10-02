@@ -33,6 +33,7 @@ export const MODULOS: Modulo[] = [
   // ── Configuración (catálogos de Planeación y de Ejecución, unificados) ─
   { key: "/configuracion/auditoria", label: "Auditoría", grupo: "Configuración", permiso: "auditoria.ver" },
   { key: "/configuracion/reportes", label: "Reportes", grupo: "Configuración", permiso: "reportes.ver" },
+  { key: "/configuracion/indicadores", label: "Indicadores", grupo: "Configuración", permiso: "indicadores.ver" },
   { key: "/configuracion/usuarios", label: "Usuarios", grupo: "Configuración", permiso: "usuarios.ver" },
   { key: "/configuracion/roles", label: "Roles y permisos", grupo: "Configuración", permiso: "usuarios.roles" },
   { key: "/configuracion/clientes", label: "Clientes", grupo: "Configuración", permiso: "config.clientes.ver" },

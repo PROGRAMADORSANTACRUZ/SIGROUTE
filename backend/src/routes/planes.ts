@@ -9,6 +9,7 @@ import {
   matchDrivinAddress,
 } from "../lib/drivinAddresses";
 import { enviarOrdenesANivel } from "../lib/nivel";
+import { capacidadEfectiva } from "../lib/fletes";
 
 const router = Router();
 // Todas las rutas de Diagrama requieren el mismo permiso que gatea la página
@@ -98,6 +99,7 @@ type FacturaParaHistorial = {
   valor: number;
   distribucion: string;
   fecha: string | null;
+  ruta: string | null; // nombre de ruta con tarifa (Orden.ruta), para costo de flete
 };
 
 // Construye el payload del escenario a partir de las órdenes asignadas en BD.
@@ -356,6 +358,7 @@ export async function buildScenarioPayload(opts: {
         valor: totalValor,
         distribucion: distribLabel,
         fecha: lineas[0].fecha ?? null,
+        ruta: lineas[0].ruta ?? null,
       });
     }
     // Info final a Drivin: primero la del cliente al que se concatenó; si no, la propia.
@@ -486,6 +489,43 @@ async function registrarEnvioDrivin(opts: {
         data: { envioDrivinId: envio.id, enviadoDrivinEn: new Date() },
       });
     }
+    await registrarFleteSnapshot(envio.id, opts.facturas);
+  }
+}
+
+// Snapshot de costo de flete por placa en el momento del envío (ver modelo
+// EnvioFlete) -- lee el precio/capacidad VIGENTES del Vehiculo de Ejecución,
+// no recalcula tarifa, solo congela lo que había al momento de enviar.
+async function registrarFleteSnapshot(envioId: string, facturas: FacturaParaHistorial[]): Promise<void> {
+  const porPlaca = new Map<string, { kg: number; ruta: string | null; fecha: string | null }>();
+  for (const f of facturas) {
+    if (!f.placa) continue;
+    const acc = porPlaca.get(f.placa) ?? { kg: 0, ruta: null, fecha: null };
+    acc.kg += f.cantidadKg;
+    acc.ruta = acc.ruta ?? f.ruta;
+    acc.fecha = acc.fecha ?? f.fecha;
+    porPlaca.set(f.placa, acc);
+  }
+  if (porPlaca.size === 0) return;
+  const vehiculos = await prisma.vehiculo.findMany({ where: { placa: { in: [...porPlaca.keys()] } } });
+  const vehiculoPorPlaca = new Map(vehiculos.map((v) => [v.placa, v]));
+  for (const [placa, { kg, ruta, fecha }] of porPlaca) {
+    if (kg <= 0) continue;
+    const vehiculo = vehiculoPorPlaca.get(placa);
+    const capacidadVehiculo = capacidadEfectiva(vehiculo);
+    const precioFlete = Number(vehiculo?.precioFlete) || 0;
+    await prisma.envioFlete.create({
+      data: {
+        envioId,
+        placa,
+        ruta,
+        fecha,
+        capacidadVehiculo,
+        precioFlete,
+        kgCargado: kg,
+        costoPorKg: kg > 0 ? precioFlete / kg : 0,
+      },
+    });
   }
 }
 

@@ -1072,9 +1072,34 @@ model EnvioDrivin {
   errorMensaje        String?  @db.Text
 
   facturas EnvioDrivinFactura[]
+  fletes   EnvioFlete[]
 
   @@index([createdAt])
   @@index([exitoso])
+}
+
+// Snapshot DURABLE de costo de flete por cada envío EXITOSO a Drivin (una fila
+// por placa dentro de un EnvioDrivin) -- a diferencia de Vehiculo.precioFlete
+// (mutable, se pisa en el próximo cambio de tarifa/ruta), esto preserva el
+// precio/capacidad vigentes en el momento exacto del envío, para poder sacar
+// costo/kg histórico real sin que cambios posteriores de tarifa lo distorsionen.
+model EnvioFlete {
+  id                String   @id @default(cuid())
+  envioId           String
+  placa             String
+  ruta              String? // nombre de ruta con tarifa (Orden.ruta), ver fletes.ts
+  fecha             String? // fecha de factura, igual criterio que EnvioDrivinFactura.fecha
+  capacidadVehiculo Float    @default(0)
+  precioFlete       Float    @default(0)
+  kgCargado         Float    @default(0)
+  costoPorKg        Float    @default(0)
+  createdAt         DateTime @default(now())
+
+  envio EnvioDrivin @relation(fields: [envioId], references: [id])
+
+  @@index([envioId])
+  @@index([placa])
+  @@index([createdAt])
 }
 
 // Detalle factura por factura de un EnvioDrivin -- una fila por cada "orden"

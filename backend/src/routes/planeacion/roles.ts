@@ -52,6 +52,9 @@ export const MODULOS: ModuloGrupo[] = [
       // comparativos entre ambos), por eso vive en Configuración y no en un
       // dominio solo.
       { label: "Reportes", claves: ["reportes.ver", "reportes.exportar"] },
+      // Igual que Reportes: cruza datos de ambos dominios (tiempos de cargue,
+      // SLA de novedades, costo de flete), vive en Configuración.
+      { label: "Indicadores", claves: ["indicadores.ver"] },
       { label: "Clientes", claves: ["config.clientes.ver", "config.clientes.editar"] },
       { label: "Vehículos", claves: ["config.vehiculos.ver", "config.vehiculos.editar"] },
       { label: "Conductores", claves: ["config.conductores.ver", "config.conductores.editar"] },
