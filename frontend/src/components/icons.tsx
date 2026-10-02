@@ -132,3 +132,15 @@ export const IconMoto = (
     <path d="M14.5 8h2l2 4.5h1.5" />
   </svg>
 );
+
+export const IconCoin = (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v10M9.5 9.5c0-1.4 1.1-2.5 2.5-2.5s2.5.8 2.5 2c0 2.5-5 1.5-5 4 0 1.2 1.1 2 2.5 2s2.5-1.1 2.5-2.5" />
+  </svg>
+);
+
+export const IconTimer = (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="13" r="8" /><path d="M12 9v4l3 2M9 2h6" />
+  </svg>
+);
