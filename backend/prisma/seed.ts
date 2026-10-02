@@ -66,8 +66,6 @@ const PERMISOS: [string, string][] = [
   ["dashboard.ejecucion.ver", "Ver la pestaña Ejecución del Dashboard"],
   ["dashboard.planeacion.ver", "Ver la pestaña Planeación del Dashboard"],
   ["dashboard.comparativo.ver", "Ver la pestaña Comparativo del Dashboard"],
-  ["plantillas_tat.ver", "Acceder al módulo Plantillas TAT"],
-  ["plantillas_tat.editar", "Capturar, importar y cruzar plantillas TAT con Siesa"],
   ["config.clientes.ver", "Ver el catálogo de Clientes"],
   ["config.clientes.editar", "Crear / editar / eliminar Clientes"],
   ["config.vehiculos.ver", "Ver el catálogo de Vehículos"],
@@ -96,7 +94,6 @@ const OPERADOR_CLAVES = [
   "distrilog.historicos.ver",
   "distrilog.nivel_servicio.ver", "distrilog.nivel_servicio.editar",
   "distrilog.config.ver",
-  "plantillas_tat.ver", "plantillas_tat.editar",
   "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
   "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
 ];
@@ -106,7 +103,6 @@ const CONSULTA_CLAVES = [
   "resumen.ver", "horarios.ver", "maestros.ver", "dashboard.ver",
   "dashboard.ejecucion.ver", "dashboard.planeacion.ver",
   "distrilog.ordenes.ver", "distrilog.historicos.ver", "distrilog.nivel_servicio.ver",
-  "plantillas_tat.ver",
   "config.clientes.ver", "config.vehiculos.ver", "config.conductores.ver",
   "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
 ];

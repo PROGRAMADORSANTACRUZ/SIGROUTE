@@ -118,13 +118,6 @@ const mapPinIcon = (
   </svg>
 );
 
-const plantillaIcon = (
-  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" />
-    <line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="9" x2="9" y2="21" />
-  </svg>
-);
-
 // Cada panel (Planeación/Ejecución) trae su propio Dashboard como primer
 // ítem — ya no hay un Dashboard global suelto; el panel se elige en "/".
 const navItems: NavItem[] = [];
@@ -165,8 +158,6 @@ const navGroups: NavGroup[] = [
           { href: "/nivel-de-servicio/tat", label: "TAT", icon: nivelServicioIcon },
         ],
       },
-      { href: "/plantillas-tat/agropecuaria", label: "TAT Agropecuaria", icon: plantillaIcon },
-      { href: "/plantillas-tat/inversiones", label: "TAT Inversiones", icon: plantillaIcon },
     ],
   },
   {

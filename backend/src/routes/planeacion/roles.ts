@@ -44,12 +44,6 @@ export const MODULOS: ModuloGrupo[] = [
     ],
   },
   {
-    label: "Plantillas TAT",
-    submodulos: [
-      { label: "Plantillas TAT (Agropecuaria e Inversiones)", claves: ["plantillas_tat.ver", "plantillas_tat.editar"] },
-    ],
-  },
-  {
     label: "Configuración",
     submodulos: [
       { label: "Usuarios y roles", claves: ["usuarios.ver", "usuarios.crear", "usuarios.editar", "usuarios.roles"] },
