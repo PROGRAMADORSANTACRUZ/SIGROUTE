@@ -123,9 +123,9 @@ const mapPinIcon = (
 const navItems: NavItem[] = [];
 
 // Dropdowns de 2do nivel del sidebar: Planeación (módulos originales de
-// rutas_web), Módulos de ejecución (DISTRILOG + Errands + Plantillas TAT) y
-// Configuración (maestros/catálogos de AMBOS dominios en un solo lugar,
-// separados por sección en vez de repartidos entre Planeación y Ejecución).
+// rutas_web), Ejecución (DISTRILOG + Errands) y Configuración (maestros/
+// catálogos de AMBOS dominios en un solo lugar, separados por sección en
+// vez de repartidos entre Planeación y Ejecución).
 const navGroups: NavGroup[] = [
   {
     label: "Planeación",
@@ -397,7 +397,7 @@ export default function Sidebar({
               // mientras no sea el panel activo (se detecta por la ruta).
               if (group.label === "Configuración") return true;
               if (!panelActivo) return true; // aún sin detectar: no ocultar de más
-              return group.label === (panelActivo === "Planeación" ? "Planeación" : "Módulos de ejecución");
+              return group.label === (panelActivo === "Planeación" ? "Planeación" : "Ejecución");
             })
             .map((group) => {
             const isOpen = open[group.label];
