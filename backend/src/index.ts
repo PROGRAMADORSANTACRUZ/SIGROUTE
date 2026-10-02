@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { iniciarLimpiezaDiaria } from "./jobs/limpiezaDiaria";
+import { iniciarSincronizacionAgropecuariaDiaria } from "./jobs/sincronizarAgropecuariaDiaria";
 
 // Red de seguridad: cualquier promesa rechazada sin capturar (ej. un error de
 // Prisma en un middleware/handler async que se nos escapó) por defecto tumba
@@ -19,6 +20,7 @@ const app = createApp();
 
 // El job de limpieza corre en TODOS los entornos (misma BD compartida siempre).
 iniciarLimpiezaDiaria();
+iniciarSincronizacionAgropecuariaDiaria();
 
 const server = app.listen(env.PORT, () => {
   console.log(`🚀 Backend escuchando en http://localhost:${env.PORT}`);
