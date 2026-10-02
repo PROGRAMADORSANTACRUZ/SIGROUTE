@@ -553,10 +553,13 @@ router.get("/export", requireAuth, async (_req, res, next) => {
     // Si no hay clientes, deja al menos la fila de encabezados como plantilla.
     if (rows.length === 0) XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A1" });
 
-    // Encabezado en negrita, más grande y con fondo de color (no plano como el resto).
+    // Encabezado en negrita, más grande y con fondo verde oscuro (no se le
+    // agrega ninguna fila de título/marca encima: este archivo debe poder
+    // subirse TAL CUAL a Drivin, la fila 1 tiene que seguir siendo el
+    // encabezado real, sin nada antes).
     const estiloEncabezado = {
       font: { bold: true, sz: 12, color: { rgb: "FFFFFF" } },
-      fill: { patternType: "solid", fgColor: { rgb: "2F8F4E" } },
+      fill: { patternType: "solid", fgColor: { rgb: "14352A" } },
       alignment: { vertical: "center", horizontal: "center" },
     };
     headers.forEach((_, i) => {
@@ -564,6 +567,16 @@ router.get("/export", requireAuth, async (_req, res, next) => {
       if (ws[ref]) (ws[ref] as XLSX.CellObject & { s?: unknown }).s = estiloEncabezado;
     });
     ws["!rows"] = [{ hpt: 22 }];
+
+    // Cuerpo con letra un poco más grande que el default de Excel, igual que
+    // el resto de reportes de la app.
+    const estiloCelda = { font: { sz: 11 } };
+    for (let r = 1; r <= rows.length; r++) {
+      headers.forEach((_, c) => {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (ws[ref]) (ws[ref] as XLSX.CellObject & { s?: unknown }).s = estiloCelda;
+      });
+    }
 
     // Ancho de columna según el contenido más largo (encabezado o dato), para
     // que no queden todas las columnas apretadas y haya que ajustarlas a mano.

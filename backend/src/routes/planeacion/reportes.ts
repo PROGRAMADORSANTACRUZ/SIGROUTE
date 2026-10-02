@@ -1,9 +1,12 @@
 // Reportes en Excel (Programación y Rutas del día) — puerto de
 // legacy_fastapi/app/routers/reportes.py, reutilizando los mismos datos que
-// Planificación/Resumen. Usa `xlsx` (ya dependencia del backend) en vez de
-// openpyxl; el contenido/columnas es igual, el estilo de celda se simplifica.
+// Planificación/Resumen. Usa `xlsx` (ya dependencia del backend) para armar
+// las hojas y `xlsx-js-style` (mismo patrón ya usado en routes/clientes.ts)
+// solo para ESCRIBIR el buffer final con estilos — la Community Edition de
+// `xlsx` ignora el estilo de celda al escribir, por eso hace falta ese fork.
 import { Router } from "express";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import { prismaPlan as prisma } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { CATEGORIAS, INSTANCIA } from "../../lib/planCategorias";
@@ -17,8 +20,97 @@ function parseFecha(s: unknown): Date {
   return d;
 }
 
+// ── Estilos compartidos (misma paleta que la UI: verde oscuro de marca para
+// encabezados/letras blancas, cuerpo con letra un poco más grande que el
+// default de Excel para que se vea prolijo) ────────────────────────────────
+const VERDE_OSCURO = "14352A";
+const BLANCO = "FFFFFF";
+const GRIS_SUBTITULO = "5F7A68";
+const VERDE_TOTAL = "EAF4E6";
+
+const ESTILO_TITULO = {
+  font: { bold: true, sz: 14, color: { rgb: BLANCO } },
+  fill: { patternType: "solid", fgColor: { rgb: VERDE_OSCURO } },
+  alignment: { vertical: "center", horizontal: "left", indent: 1 },
+};
+const ESTILO_SUBTITULO = {
+  font: { italic: true, sz: 10, color: { rgb: GRIS_SUBTITULO } },
+  alignment: { vertical: "center", horizontal: "left", indent: 1 },
+};
+const ESTILO_ENCABEZADO = {
+  font: { bold: true, sz: 12, color: { rgb: BLANCO } },
+  fill: { patternType: "solid", fgColor: { rgb: VERDE_OSCURO } },
+  alignment: { vertical: "center", horizontal: "center" },
+};
+const ESTILO_CELDA = { font: { sz: 11 } };
+const ESTILO_TOTAL = {
+  font: { bold: true, sz: 11, color: { rgb: VERDE_OSCURO } },
+  fill: { patternType: "solid", fgColor: { rgb: VERDE_TOTAL } },
+};
+
+type CeldaEstilo = XLSX.CellObject & { s?: Record<string, unknown>; z?: string };
+
+function aplicarEstilo(ws: XLSX.WorkSheet, r: number, c: number, estilo: Record<string, unknown>) {
+  const ref = XLSX.utils.encode_cell({ r, c });
+  if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+  (ws[ref] as CeldaEstilo).s = estilo;
+}
+
+function fusionarFila(ws: XLSX.WorkSheet, fila: number, nCols: number) {
+  if (nCols < 2) return;
+  ws["!merges"] = [...(ws["!merges"] ?? []), { s: { r: fila, c: 0 }, e: { r: fila, c: nCols - 1 } }];
+}
+
+function estilizarEncabezado(ws: XLSX.WorkSheet, fila: number, nCols: number) {
+  for (let c = 0; c < nCols; c++) aplicarEstilo(ws, fila, c, ESTILO_ENCABEZADO);
+}
+
+function estilizarCuerpo(ws: XLSX.WorkSheet, desde: number, hasta: number, nCols: number) {
+  for (let r = desde; r <= hasta; r++) {
+    for (let c = 0; c < nCols; c++) aplicarEstilo(ws, r, c, ESTILO_CELDA);
+  }
+}
+
+function estilizarTotal(ws: XLSX.WorkSheet, fila: number, nCols: number) {
+  for (let c = 0; c < nCols; c++) aplicarEstilo(ws, fila, c, ESTILO_TOTAL);
+}
+
+function anchoColumnas(headers: string[], rows: (string | number)[][]): XLSX.ColInfo[] {
+  return headers.map((h, i) => {
+    let max = String(h).length;
+    for (const row of rows) {
+      const v = row[i];
+      const len = v == null ? 0 : String(v).length;
+      if (len > max) max = len;
+    }
+    return { wch: Math.min(Math.max(max + 2, 10), 60) };
+  });
+}
+
+function lineaGenerado(): string {
+  return `Generado por el software SIGROUTE — Grupo Santacruz · ${new Date().toLocaleString("es-CO")}`;
+}
+
+// Bloque de marca al inicio de cada hoja: título del reporte + línea
+// "Generado por SIGROUTE" + líneas de info opcionales (consecutivo/estado,
+// rango de fechas) + una fila en blanco antes del encabezado de la tabla.
+function bloqueTitulo(titulo: string, info: string[] = []): (string | number)[][] {
+  return [[titulo], [lineaGenerado()], ...info.map((l) => [l]), []];
+}
+
+// Aplica el estilo de marca a las filas del bloqueTitulo (título + generado +
+// info), fusionando cada una a todo el ancho de la tabla.
+function estilizarBloqueTitulo(ws: XLSX.WorkSheet, nFilasInfo: number, nCols: number) {
+  fusionarFila(ws, 0, nCols);
+  aplicarEstilo(ws, 0, 0, ESTILO_TITULO);
+  for (let i = 0; i <= nFilasInfo; i++) {
+    fusionarFila(ws, 1 + i, nCols);
+    aplicarEstilo(ws, 1 + i, 0, ESTILO_SUBTITULO);
+  }
+}
+
 function enviarExcel(res: import("express").Response, wb: XLSX.WorkBook, filename: string) {
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const buf = XLSXStyle.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(buf);
@@ -50,6 +142,7 @@ function etiquetaDestino(
 router.get("/programacion.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
+    const fechaStr = fecha.toISOString().slice(0, 10);
     const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha } } });
     const detalleRows = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { not: null } } }) : [];
     const clienteIds = detalleRows.map((d) => d.clienteId as string);
@@ -64,12 +157,7 @@ router.get("/programacion.xlsx", requirePermiso("reportes.exportar"), async (req
     const detalle = new Map(detalleRows.map((d) => [d.clienteId as string, d as unknown as Record<string, unknown>]));
 
     const headers = ["N°", "Destino", "Canal", ...CATEGORIAS.flatMap((c) => [`${c.etiqueta} Kls`, `${c.etiqueta} Can`]), "Total Kls"];
-    const rows: (string | number)[][] = [
-      [`Programación de Rutas — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)}`],
-      prog ? [`Consecutivo N° ${prog.consecutivo} · Estado: ${prog.estado}`] : [],
-      [],
-      headers,
-    ];
+    const dataRows: (string | number)[][] = [];
     let grandKls = 0;
     for (const d of destinos) {
       const row = detalle.get(d.id) ?? {};
@@ -83,14 +171,26 @@ router.get("/programacion.xlsx", requirePermiso("reportes.exportar"), async (req
       }
       cells.push(rk);
       grandKls += rk;
-      rows.push(cells);
+      dataRows.push(cells);
     }
-    rows.push(["", "TOTAL", "", ...CATEGORIAS.flatMap(() => ["", ""]), grandKls]);
+    const filaTotal = dataRows.length;
+    dataRows.push(["", "TOTAL", "", ...CATEGORIAS.flatMap(() => ["", ""]), grandKls]);
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const info = prog ? [`Consecutivo N° ${prog.consecutivo} · Estado: ${prog.estado}`] : ["Sin programación para esta fecha"];
+    const bloque = bloqueTitulo(`Programación de Rutas — ${INSTANCIA} — ${fechaStr}`, info);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, info.length, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + filaTotal, nCols);
+    estilizarTotal(ws, filaEncabezado + 1 + filaTotal, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+    ws["!rows"] = [{ hpt: 26 }, { hpt: 16 }, ...info.map(() => ({ hpt: 16 })), { hpt: 6 }, { hpt: 22 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Programación");
-    enviarExcel(res, wb, `programacion_${fecha.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `programacion_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }
@@ -100,6 +200,7 @@ router.get("/programacion.xlsx", requirePermiso("reportes.exportar"), async (req
 router.get("/rutas.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
+    const fechaStr = fecha.toISOString().slice(0, 10);
     const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha } } });
     const rutas = prog
       ? await prisma.planRuta.findMany({
@@ -114,27 +215,32 @@ router.get("/rutas.xlsx", requirePermiso("reportes.exportar"), async (req, res, 
         })
       : [];
 
-    const rows: (string | number)[][] = [
-      [`Rutas del Día — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)}`],
-      [],
-      ["Ruta", "Vehículo", "Conductor", "Hora Cargue", "Peso Total", "Auxiliares", "Destinos (en orden)"],
-    ];
+    const headers = ["Ruta", "Vehículo", "Conductor", "Hora Cargue", "Peso Total", "Auxiliares", "Destinos (en orden)"];
     const clientePorId = await resolverClientes(rutas.flatMap((r) => r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x)));
-    for (const r of rutas) {
-      rows.push([
-        r.numeroRuta,
-        r.vehiculo?.placa ?? "",
-        r.conductor?.nombre ?? "",
-        r.horaCargue ?? "",
-        r.pesoTotal ?? 0,
-        r.auxiliares.map((a) => a.auxiliar.nombre).join(", "),
-        r.destinos.map((d) => etiquetaDestino(d, clientePorId)).join(" → "),
-      ]);
-    }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const dataRows: (string | number)[][] = rutas.map((r) => [
+      r.numeroRuta,
+      r.vehiculo?.placa ?? "",
+      r.conductor?.nombre ?? "",
+      r.horaCargue ?? "",
+      r.pesoTotal ?? 0,
+      r.auxiliares.map((a) => a.auxiliar.nombre).join(", "),
+      r.destinos.map((d) => etiquetaDestino(d, clientePorId)).join(" → "),
+    ]);
+
+    const info = prog ? [] : ["Sin programación para esta fecha"];
+    const bloque = bloqueTitulo(`Rutas del Día — ${INSTANCIA} — ${fechaStr}`, info);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, info.length, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+    ws["!rows"] = [{ hpt: 26 }, { hpt: 16 }, ...info.map(() => ({ hpt: 16 })), { hpt: 6 }, { hpt: 22 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Rutas");
-    enviarExcel(res, wb, `rutas_${fecha.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `rutas_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }
@@ -144,6 +250,7 @@ router.get("/rutas.xlsx", requirePermiso("reportes.exportar"), async (req, res, 
 router.get("/resumen.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
+    const fechaStr = fecha.toISOString().slice(0, 10);
     const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha } } });
     const detalle = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id } }) : [];
     const rutas = prog
@@ -161,7 +268,7 @@ router.get("/resumen.xlsx", requirePermiso("reportes.exportar"), async (req, res
 
     let grandKls = 0;
     let grandCan = 0;
-    const filasCategoria: (string | number)[][] = [["Categoría", "Kls", "Canastillas"]];
+    const filasCategoria: (string | number)[][] = [];
     for (const c of CATEGORIAS) {
       const kls = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0), 0);
       const can = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.can] ?? 0), 0);
@@ -169,45 +276,63 @@ router.get("/resumen.xlsx", requirePermiso("reportes.exportar"), async (req, res
       grandCan += can;
       filasCategoria.push([c.etiqueta, kls, can]);
     }
-    filasCategoria.push(["TOTAL", grandKls, grandCan]);
 
     const destinosConProducto = detalle.filter((d) =>
       CATEGORIAS.some((c) => Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0) > 0)
     ).length;
 
-    const wsResumen = XLSX.utils.aoa_to_sheet([
-      [`Resumen del Día — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)}`],
-      prog ? [`Consecutivo N° ${prog.consecutivo} · Estado: ${prog.estado}`] : ["Sin programación para esta fecha"],
-      [],
+    // ── Hoja 1: Resumen (indicadores + tabla de categorías) ──────────────
+    const info = [prog ? `Consecutivo N° ${prog.consecutivo} · Estado: ${prog.estado}` : "Sin programación para esta fecha"];
+    const bloque = bloqueTitulo(`Resumen del Día — ${INSTANCIA} — ${fechaStr}`, info);
+    const indicadores: (string | number)[][] = [
       ["Destinos con producto", destinosConProducto],
       ["Rutas", rutas.length],
       ["Rutas asignadas", rutas.filter((r) => r.vehiculoId != null).length],
       ["Rutas cerradas", rutas.filter((r) => r.cerrada).length],
       [],
+    ];
+    const filaIndicadores = bloque.length;
+    const headersCategoria = ["Categoría", "Kls", "Canastillas"];
+    const filaEncabezadoCategoria = filaIndicadores + indicadores.length;
+    const wsResumen = XLSX.utils.aoa_to_sheet([
+      ...bloque,
+      ...indicadores,
+      headersCategoria,
       ...filasCategoria,
+      ["TOTAL", grandKls, grandCan],
     ]);
+    estilizarBloqueTitulo(wsResumen, info.length, 3);
+    for (let i = 0; i < 4; i++) aplicarEstilo(wsResumen, filaIndicadores + i, 0, { font: { bold: true, sz: 11 } });
+    estilizarEncabezado(wsResumen, filaEncabezadoCategoria, 3);
+    estilizarCuerpo(wsResumen, filaEncabezadoCategoria + 1, filaEncabezadoCategoria + filasCategoria.length, 3);
+    estilizarTotal(wsResumen, filaEncabezadoCategoria + 1 + filasCategoria.length, 3);
+    wsResumen["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }];
 
-    const wsRutas = XLSX.utils.aoa_to_sheet([
-      ["Ruta", "Vehículo", "Conductor", "Hora Cargue", "Cerrada", "Peso Total", "Auxiliares", "Destinos (en orden)"],
-      ...(await (async () => {
-        const clientePorId = await resolverClientes(rutas.flatMap((r) => r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x)));
-        return rutas.map((r) => [
-          r.numeroRuta,
-          r.vehiculo?.placa ?? "",
-          r.conductor?.nombre ?? "",
-          r.horaCargue ?? "",
-          r.cerrada ? "Sí" : "No",
-          r.pesoTotal ?? 0,
-          r.auxiliares.map((a) => a.auxiliar.nombre).join(", "),
-          r.destinos.map((d) => etiquetaDestino(d, clientePorId)).join(" → "),
-        ]);
-      })()),
+    // ── Hoja 2: Rutas ─────────────────────────────────────────────────────
+    const clientePorId = await resolverClientes(rutas.flatMap((r) => r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x)));
+    const headersRutas = ["Ruta", "Vehículo", "Conductor", "Hora Cargue", "Cerrada", "Peso Total", "Auxiliares", "Destinos (en orden)"];
+    const dataRutas = rutas.map((r) => [
+      r.numeroRuta,
+      r.vehiculo?.placa ?? "",
+      r.conductor?.nombre ?? "",
+      r.horaCargue ?? "",
+      r.cerrada ? "Sí" : "No",
+      r.pesoTotal ?? 0,
+      r.auxiliares.map((a) => a.auxiliar.nombre).join(", "),
+      r.destinos.map((d) => etiquetaDestino(d, clientePorId)).join(" → "),
     ]);
+    const bloqueRutas = bloqueTitulo(`Rutas — ${INSTANCIA} — ${fechaStr}`);
+    const filaEncabezadoRutas = bloqueRutas.length;
+    const wsRutas = XLSX.utils.aoa_to_sheet([...bloqueRutas, headersRutas, ...dataRutas]);
+    estilizarBloqueTitulo(wsRutas, 0, headersRutas.length);
+    estilizarEncabezado(wsRutas, filaEncabezadoRutas, headersRutas.length);
+    estilizarCuerpo(wsRutas, filaEncabezadoRutas + 1, filaEncabezadoRutas + dataRutas.length, headersRutas.length);
+    wsRutas["!cols"] = anchoColumnas(headersRutas, dataRutas);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
     XLSX.utils.book_append_sheet(wb, wsRutas, "Rutas");
-    enviarExcel(res, wb, `resumen_${fecha.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `resumen_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }
@@ -217,6 +342,7 @@ router.get("/resumen.xlsx", requirePermiso("reportes.exportar"), async (req, res
 router.get("/areas-carga.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
+    const fechaStr = fecha.toISOString().slice(0, 10);
     const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha } } });
     const rutas = prog
       ? await prisma.planRuta.findMany({
@@ -227,22 +353,23 @@ router.get("/areas-carga.xlsx", requirePermiso("reportes.exportar"), async (req,
       : [];
 
     const presentes = new Set<string>();
-    const filas: { numeroRuta: number; vehiculo: string; conductor: string; cargada: string; celdas: Record<string, string> }[] = [];
+    const filas: { numeroRuta: number; vehiculo: string; conductor: string; cargada: string; celdas: Record<string, { estado: string; hora: string }> }[] = [];
     for (const r of rutas) {
       const clienteIds = r.destinos.map((d) => d.clienteId).filter((x): x is string => !!x);
       const detalle = clienteIds.length && prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id, clienteId: { in: clienteIds } } }) : [];
-      const celdas: Record<string, string> = {};
+      const celdas: Record<string, { estado: string; hora: string }> = {};
       for (const c of CATEGORIAS) {
         const k = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0), 0);
         const cc = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.can] ?? 0), 0);
         if (k > 0 || cc > 0) {
           const est = r.areaCarga.find((a) => a.area === c.etiqueta);
           // La hora solo aporta algo cuando ya está CARGADA (si no, es solo
-          // "cuándo se tocó por última vez" un estado intermedio sin interés).
+          // "cuándo se tocó por última vez" un estado intermedio sin interés)
+          // -- va en SU PROPIA columna, no embebida en el texto del estado.
           const hora = est?.estado === "CARGADA" && est.actualizadoAt
-            ? ` (${est.actualizadoAt.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })})`
+            ? est.actualizadoAt.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })
             : "";
-          celdas[c.etiqueta] = (est?.estado ?? "PENDIENTE") + hora;
+          celdas[c.etiqueta] = { estado: est?.estado ?? "PENDIENTE", hora };
           presentes.add(c.etiqueta);
         }
       }
@@ -250,18 +377,26 @@ router.get("/areas-carga.xlsx", requirePermiso("reportes.exportar"), async (req,
     }
     const columnas = CATEGORIAS.map((c) => c.etiqueta).filter((l) => presentes.has(l));
 
-    const rows: (string | number)[][] = [
-      [`Áreas para Cargar — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)}`],
-      [],
-      ["Ruta", "Vehículo", "Conductor", ...columnas, "Cargada"],
-    ];
-    for (const f of filas) {
-      rows.push([f.numeroRuta, f.vehiculo, f.conductor, ...columnas.map((c) => f.celdas[c] ?? "—"), f.cargada]);
-    }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const headers = ["Ruta", "Vehículo", "Conductor", ...columnas.flatMap((c) => [c, `${c} — Hora`]), "Cargada"];
+    const dataRows: (string | number)[][] = filas.map((f) => [
+      f.numeroRuta, f.vehiculo, f.conductor,
+      ...columnas.flatMap((c) => [f.celdas[c]?.estado ?? "—", f.celdas[c]?.hora ?? ""]),
+      f.cargada,
+    ]);
+
+    const info = prog ? [] : ["Sin programación para esta fecha"];
+    const bloque = bloqueTitulo(`Áreas para Cargar — ${INSTANCIA} — ${fechaStr}`, info);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, info.length, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Áreas para Cargar");
-    enviarExcel(res, wb, `areas_carga_${fecha.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `areas_carga_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }
@@ -271,36 +406,45 @@ router.get("/areas-carga.xlsx", requirePermiso("reportes.exportar"), async (req,
 router.get("/auditoria.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
+    const fechaStr = fecha.toISOString().slice(0, 10);
     const desde = new Date(fecha);
     const hasta = new Date(fecha);
     hasta.setHours(23, 59, 59, 999);
     const registros = await prisma.auditLog.findMany({ where: { fecha: { gte: desde, lte: hasta } }, orderBy: { fecha: "asc" } });
 
-    const rows: (string | number)[][] = [
-      [`Auditoría — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)}`],
-      [],
-      ["Fecha/Hora", "Usuario", "Módulo", "Acción", "Detalle"],
-    ];
-    for (const r of registros) {
-      rows.push([r.fecha.toLocaleString("es-CO"), r.usuario ?? "", r.modulo ?? "", r.accion ?? "", r.detalle ?? ""]);
-    }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const headers = ["Fecha", "Hora", "Usuario", "Módulo", "Acción", "Detalle"];
+    const dataRows: (string | number)[][] = registros.map((r) => [
+      r.fecha.toLocaleDateString("es-CO"),
+      r.fecha.toLocaleTimeString("es-CO"),
+      r.usuario ?? "",
+      r.modulo ?? "",
+      r.accion ?? "",
+      r.detalle ?? "",
+    ]);
+
+    const bloque = bloqueTitulo(`Auditoría — ${INSTANCIA} — ${fechaStr}`);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, 0, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Auditoría");
-    enviarExcel(res, wb, `auditoria_${fecha.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `auditoria_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }
 });
 
-// GET /api/planeacion/reportes/cierres-area.xlsx?fecha=&fechaFin= — histórico
-// de a qué hora se cerró/reabrió cada área de Programación, día por día
-// (AreaEstado ya guarda cerradoAt/cerradoPor por cada Programacion/día; esto
-// solo lo recorre en un rango en vez de un único día).
 router.get("/cierres-area.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
   try {
     const fecha = parseFecha(req.query.fecha);
     const fechaFin = req.query.fechaFin ? parseFecha(req.query.fechaFin) : fecha;
+    const fechaStr = fecha.toISOString().slice(0, 10);
+    const fechaFinStr = fechaFin.toISOString().slice(0, 10);
 
     const programaciones = await prisma.programacion.findMany({
       where: { instancia: INSTANCIA, fecha: { gte: fecha, lte: fechaFin } },
@@ -308,28 +452,34 @@ router.get("/cierres-area.xlsx", requirePermiso("reportes.exportar"), async (req
       orderBy: { fecha: "asc" },
     });
 
-    const rows: (string | number)[][] = [
-      [`Cierres de área — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)} a ${fechaFin.toISOString().slice(0, 10)}`],
-      [],
-      ["Fecha", "Área", "Estado", "Cerrado por", "Hora de cierre"],
-    ];
+    const headers = ["Fecha", "Área", "Estado", "Cerrado por", "Hora de cierre"];
+    const dataRows: (string | number)[][] = [];
     for (const prog of programaciones) {
       const porArea = new Map(prog.areaEstados.map((e) => [e.area, e]));
       for (const c of CATEGORIAS) {
         const e = porArea.get(c.etiqueta);
-        rows.push([
+        dataRows.push([
           prog.fecha.toISOString().slice(0, 10),
           c.etiqueta,
           e?.cerrado ? "Cerrada" : "Abierta",
           e?.cerradoPor ?? "",
-          e?.cerradoAt ? e.cerradoAt.toLocaleString("es-CO") : "",
+          e?.cerradoAt ? e.cerradoAt.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "",
         ]);
       }
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    const bloque = bloqueTitulo(`Cierres de área — ${INSTANCIA} — ${fechaStr} a ${fechaFinStr}`);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, 0, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Cierres de área");
-    enviarExcel(res, wb, `cierres_area_${fecha.toISOString().slice(0, 10)}_${fechaFin.toISOString().slice(0, 10)}.xlsx`);
+    enviarExcel(res, wb, `cierres_area_${fechaStr}_${fechaFinStr}.xlsx`);
   } catch (err) {
     next(err);
   }

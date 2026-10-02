@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import { getPredistribucion } from "@/lib/planApi";
 import type { ConsolidadoTipo } from "@/lib/predistribucionImport";
 import { PageLoader } from "@/components/Loading";
@@ -24,23 +23,73 @@ export default function PredistribucionDetallePage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  function exportarExcel() {
+  async function exportarExcel() {
     if (!data) return;
     const { productos, tiendas, celdas, totalesFila } = data.datos;
-    const header = ["SIESA", "Desc PLU", "PLU", ...tiendas.map((t) => t.desc || t.dep), "Total"];
-    const rows: (string | number)[][] = [header];
-    for (const p of productos) {
-      const fila = [p.siesa, p.desc, p.plu, ...tiendas.map((t) => celdas[`${p.plu}|${t.dep}`] ?? 0), totalesFila[p.plu] ?? 0];
-      rows.push(fila);
-    }
+    const headers = ["SIESA", "Desc PLU", "PLU", ...tiendas.map((t) => t.desc || t.dep), "Total"];
+    const filas: (string | number)[][] = productos.map((p) => [
+      p.siesa, p.desc, p.plu, ...tiendas.map((t) => celdas[`${p.plu}|${t.dep}`] ?? 0), totalesFila[p.plu] ?? 0,
+    ]);
     const totalGeneral = tiendas.reduce((acc, t) => acc + productos.reduce((a, p) => a + (celdas[`${p.plu}|${t.dep}`] ?? 0), 0), 0);
     const granTotalPorTienda = tiendas.map((t) => productos.reduce((acc, p) => acc + (celdas[`${p.plu}|${t.dep}`] ?? 0), 0));
-    rows.push(["", "TOTAL", "", ...granTotalPorTienda, totalGeneral]);
+    filas.push(["", "TOTAL", "", ...granTotalPorTienda, totalGeneral]);
 
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, data.tipo ?? "Consolidado");
-    XLSX.writeFile(wb, `predistribucion_${data.tipo}_${data.id}.xlsx`);
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "SIGROUTE";
+    wb.created = new Date();
+    const nombreHoja = data.tipo ?? "Consolidado";
+    const ws = wb.addWorksheet(nombreHoja, { views: [{ state: "frozen", ySplit: 3 }] });
+    const VERDE_OSCURO = "FF14352A";
+    const BLANCO = "FFFFFFFF";
+
+    ws.mergeCells(1, 1, 1, headers.length);
+    const tCell = ws.getCell(1, 1);
+    tCell.value = `Predistribución — ${nombreHoja} · ${data.ffin ?? ""}`;
+    tCell.font = { bold: true, size: 14, color: { argb: BLANCO } };
+    tCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE_OSCURO } };
+    tCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+    ws.getRow(1).height = 24;
+
+    ws.mergeCells(2, 1, 2, headers.length);
+    const gCell = ws.getCell(2, 1);
+    gCell.value = `Generado por el software SIGROUTE — Grupo Santacruz · ${new Date().toLocaleString("es-CO")}`;
+    gCell.font = { italic: true, size: 10, color: { argb: "FF5F7A68" } };
+    gCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+    ws.getRow(2).height = 18;
+
+    const headerRow = ws.getRow(3);
+    headers.forEach((h, i) => {
+      const cell = headerRow.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, size: 12, color: { argb: BLANCO } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE_OSCURO } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+    headerRow.height = 22;
+
+    for (const fila of filas) {
+      const r = ws.addRow(fila);
+      r.height = 16;
+      r.eachCell((cell) => { cell.font = { size: 11 }; });
+    }
+    headers.forEach((h, i) => {
+      let max = h.length;
+      for (const fila of filas) {
+        const len = String(fila[i] ?? "").length;
+        if (len > max) max = len;
+      }
+      ws.getColumn(i + 1).width = Math.min(Math.max(max + 2, 10), 60);
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `predistribucion_${data.tipo}_${data.id}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   if (loading) return <PageLoader />;

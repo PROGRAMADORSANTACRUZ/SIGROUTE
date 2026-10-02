@@ -256,29 +256,54 @@ export default function DiagramaPage() {
   }
 
   // Excel con todo el diagrama visible (una hoja de resumen por vehículo/ruta
-  // + el detalle de remisiones). Encabezados verdes/letras blancas y columnas
-  // anchas según el contenido real (sin wrap) para que ninguna fila quede
-  // partida — si una columna no cabe en pantalla, Excel scrollea en x.
+  // + el detalle de remisiones). Mismo estilo que los demás reportes de la
+  // app: bloque de marca (título + "Generado por SIGROUTE") arriba, encabezado
+  // verde oscuro/letras blancas, cuerpo con letra un poco más grande, y
+  // columnas anchas según el contenido real (sin wrap) para que ninguna fila
+  // quede partida — si una columna no cabe en pantalla, Excel scrollea en x.
   async function exportarExcel() {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
     wb.creator = "SIGROUTE";
     wb.created = new Date();
 
-    const VERDE = "FF2F8F4E";
+    const VERDE_OSCURO = "FF14352A";
     const BLANCO = "FFFFFFFF";
+    const GRIS_SUBTITULO = "FF5F7A68";
 
-    function agregarHoja(nombre: string, headers: string[], filas: (string | number)[][]) {
-      const ws = wb.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: 1 }] });
-      const headerRow = ws.addRow(headers);
-      headerRow.height = 20;
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: BLANCO } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE } };
-        cell.alignment = { vertical: "middle", horizontal: "left" };
+    function agregarHoja(nombre: string, titulo: string, headers: string[], filas: (string | number)[][]) {
+      const ws = wb.addWorksheet(nombre, { views: [{ state: "frozen", ySplit: 3 }] });
+      const nCols = headers.length;
+
+      ws.mergeCells(1, 1, 1, nCols);
+      const tCell = ws.getCell(1, 1);
+      tCell.value = titulo;
+      tCell.font = { bold: true, size: 14, color: { argb: BLANCO } };
+      tCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE_OSCURO } };
+      tCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+      ws.getRow(1).height = 24;
+
+      ws.mergeCells(2, 1, 2, nCols);
+      const gCell = ws.getCell(2, 1);
+      gCell.value = `Generado por el software SIGROUTE — Grupo Santacruz · ${new Date().toLocaleString("es-CO")}`;
+      gCell.font = { italic: true, size: 10, color: { argb: GRIS_SUBTITULO } };
+      gCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+      ws.getRow(2).height = 18;
+
+      const headerRow = ws.getRow(3);
+      headers.forEach((h, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = { bold: true, size: 12, color: { argb: BLANCO } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE_OSCURO } };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
       });
+      headerRow.height = 22;
+
       for (const fila of filas) {
-        ws.addRow(fila).height = 16;
+        const r = ws.addRow(fila);
+        r.height = 16;
+        r.eachCell((cell) => { cell.font = { size: 11 }; });
       }
       // Ancho = el texto más largo de esa columna (encabezado incluido), sin
       // wrap -> cada fila queda en una sola línea completa, nunca apachurrada.
@@ -303,7 +328,7 @@ export default function DiagramaPage() {
         capacidadEfectiva(g.vehiculo) ?? "", flete ?? "", flete && g.totalKg ? Number((flete / g.totalKg).toFixed(0)) : "",
       ]);
     }
-    agregarHoja("Resumen", ["Placa", "Conductor", "Flota", "Ruta", "Remisiones", "Kg cargados", "Capacidad", "Precio flete", "$/kg"], resumen);
+    agregarHoja("Resumen", `Diagrama — Resumen por vehículo — ${hoy()}`, ["Placa", "Conductor", "Flota", "Ruta", "Remisiones", "Kg cargados", "Capacidad", "Precio flete", "$/kg"], resumen);
 
     const detalle: (string | number)[][] = [];
     for (const g of filtrados) {
@@ -312,7 +337,7 @@ export default function DiagramaPage() {
         detalle.push([g.vehiculo.placa, ruta, r.numeroOrden, tc(r.cliente), tc(r.destino), Math.round(r.cantidadKg), r.enviado ? "Enviado" : "Pendiente"]);
       }
     }
-    agregarHoja("Detalle", ["Placa", "Ruta", "No. Orden", "Cliente", "Destino", "Kg", "Estado"], detalle);
+    agregarHoja("Detalle", `Diagrama — Detalle de remisiones — ${hoy()}`, ["Placa", "Ruta", "No. Orden", "Cliente", "Destino", "Kg", "Estado"], detalle);
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });

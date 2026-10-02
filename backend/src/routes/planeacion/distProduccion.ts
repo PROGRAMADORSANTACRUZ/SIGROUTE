@@ -6,6 +6,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import { prismaPlan as prisma } from "../../lib/prisma";
 import { HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
@@ -93,14 +94,44 @@ router.get("/:id/export.xlsx", requirePermiso("distribucion.ver"), async (req, r
     const productos = [...new Set(item.detalle.map((d) => d.producto ?? ""))];
     const cell = new Map(item.detalle.map((d) => [`${d.producto}|${d.tienda}`, d.distribuido ?? 0]));
 
-    const rows: (string | number)[][] = [["Producto", ...tiendas]];
-    for (const p of productos) {
-      rows.push([p, ...tiendas.map((t) => cell.get(`${p}|${t}`) ?? 0)]);
+    const headers = ["Producto", ...tiendas];
+    const dataRows: (string | number)[][] = productos.map((p) => [p, ...tiendas.map((t) => cell.get(`${p}|${t}`) ?? 0)]);
+    const fechaStr = item.fecha.toISOString().slice(0, 10);
+
+    const titulo = `Distribución Producción — ${fechaStr}`;
+    const generado = `Generado por el software SIGROUTE — Grupo Santacruz · ${new Date().toLocaleString("es-CO")}`;
+    const ws = XLSX.utils.aoa_to_sheet([[titulo], [generado], [], headers, ...dataRows]);
+    const nCols = headers.length;
+
+    const aplicar = (r: number, c: number, s: Record<string, unknown>) => {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+      (ws[ref] as XLSX.CellObject & { s?: unknown }).s = s;
+    };
+    if (nCols > 1) {
+      ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: nCols - 1 } }];
     }
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    aplicar(0, 0, { font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: "14352A" } }, alignment: { vertical: "center", horizontal: "left", indent: 1 } });
+    aplicar(1, 0, { font: { italic: true, sz: 10, color: { rgb: "5F7A68" } } });
+    for (let c = 0; c < nCols; c++) {
+      aplicar(3, c, { font: { bold: true, sz: 12, color: { rgb: "FFFFFF" } }, fill: { patternType: "solid", fgColor: { rgb: "14352A" } }, alignment: { vertical: "center", horizontal: "center" } });
+    }
+    for (let r = 4; r < 4 + dataRows.length; r++) {
+      for (let c = 0; c < nCols; c++) aplicar(r, c, { font: { sz: 11 } });
+    }
+    ws["!rows"] = [{ hpt: 24 }, { hpt: 16 }, { hpt: 6 }, { hpt: 22 }];
+    ws["!cols"] = headers.map((h, i) => {
+      let max = String(h).length;
+      for (const row of dataRows) {
+        const len = String(row[i] ?? "").length;
+        if (len > max) max = len;
+      }
+      return { wch: Math.min(Math.max(max + 2, 10), 60) };
+    });
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Distribución");
-    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const buf = XLSXStyle.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="distribucion_${id}.xlsx"`);
     res.send(buf);
