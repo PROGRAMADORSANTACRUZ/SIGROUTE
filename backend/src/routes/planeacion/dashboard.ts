@@ -435,4 +435,112 @@ router.post("/rellenar-ejecutado", requirePermiso("programacion.editar"), async 
   }
 });
 
+// GET /api/planeacion/dashboard/envios-drivin-historico?desde=&hasta=&buscar=
+// Listado completo (no el top-20 de /envios-drivin) para la pestaña "Órdenes
+// Ejecutadas" de Históricos — EnvioDrivin es DURABLE (nunca se borra, a
+// diferencia de Orden/OrdenHistorico que se archivan y limpian a diario), así
+// que es la fuente real de "qué se mandó de verdad a Drivin" sin importar
+// qué tan vieja sea la fecha pedida.
+router.get("/envios-drivin-historico", async (req, res, next) => {
+  try {
+    const hasta = typeof req.query.hasta === "string" && req.query.hasta ? new Date(req.query.hasta) : new Date();
+    hasta.setHours(23, 59, 59, 999);
+    const desde = typeof req.query.desde === "string" && req.query.desde ? new Date(req.query.desde) : new Date(hasta);
+    if (!req.query.desde) desde.setDate(desde.getDate() - 30);
+    desde.setHours(0, 0, 0, 0);
+
+    const envios = await prisma.envioDrivin.findMany({
+      where: { createdAt: { gte: desde, lte: hasta } },
+      include: { facturas: true },
+      orderBy: { createdAt: "desc" },
+      take: 300,
+    });
+
+    const buscar = typeof req.query.buscar === "string" ? req.query.buscar.trim().toLowerCase() : "";
+    const filtrados = buscar
+      ? envios.filter((e) =>
+          (e.placas ?? "").toLowerCase().includes(buscar) ||
+          (e.usuarioNombre ?? "").toLowerCase().includes(buscar) ||
+          e.facturas.some((f) => f.numeroOrden.toLowerCase().includes(buscar) || (f.cliente ?? "").toLowerCase().includes(buscar))
+        )
+      : envios;
+
+    res.json(filtrados.map((e) => ({
+      id: e.id,
+      createdAt: e.createdAt,
+      tipo: e.tipo,
+      usuarioNombre: e.usuarioNombre,
+      exitoso: e.exitoso,
+      placas: e.placas,
+      totalFacturas: e.totalFacturas,
+      totalKg: Math.round(e.totalKg),
+      totalValor: Math.round(e.totalValor),
+      errorMensaje: e.errorMensaje,
+      facturas: e.facturas.map((f) => ({
+        numeroOrden: f.numeroOrden, cliente: f.cliente, destino: f.destino, placa: f.placa,
+        cantidadKg: Math.round(f.cantidadKg * 10) / 10, valor: Math.round(f.valor), distribucion: f.distribucion, fecha: f.fecha,
+      })),
+    })));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/dashboard/historico-planeacion?desde=&hasta=
+// Para la pestaña "Planeación" de Históricos: un resumen por día (kg/
+// canastillas planificados, destinos con carga, rutas y áreas cerradas) —
+// mismos datos que ya calculan Resumen del Día y Cierres de área, pero
+// navegables día por día en un rango, no solo como Excel.
+router.get("/historico-planeacion", async (req, res, next) => {
+  try {
+    const hasta = typeof req.query.hasta === "string" && req.query.hasta ? new Date(req.query.hasta) : new Date();
+    hasta.setHours(0, 0, 0, 0);
+    const desde = typeof req.query.desde === "string" && req.query.desde ? new Date(req.query.desde) : new Date(hasta);
+    if (!req.query.desde) desde.setDate(desde.getDate() - 30);
+    desde.setHours(0, 0, 0, 0);
+
+    const programaciones = await prisma.programacion.findMany({
+      where: { instancia: INSTANCIA, fecha: { gte: desde, lte: hasta } },
+      include: {
+        detalle: true,
+        areaEstados: true,
+        rutas: { select: { id: true, cerrada: true, vehiculoId: true } },
+      },
+      orderBy: { fecha: "desc" },
+    });
+
+    res.json(programaciones.map((p) => {
+      let totalKg = 0;
+      let totalCan = 0;
+      let destinosConCarga = 0;
+      for (const d of p.detalle) {
+        const row = d as unknown as Record<string, unknown>;
+        let kg = 0;
+        let can = 0;
+        for (const c of CATEGORIAS) {
+          kg += Number(row[c.kls] ?? 0);
+          can += Number(row[c.can] ?? 0);
+        }
+        if (kg > 0 || can > 0) destinosConCarga++;
+        totalKg += kg;
+        totalCan += can;
+      }
+      return {
+        fecha: p.fecha.toISOString().slice(0, 10),
+        consecutivo: p.consecutivo,
+        estado: p.estado,
+        totalKg: Math.round(totalKg),
+        totalCanastillas: Math.round(totalCan),
+        destinosConCarga,
+        rutas: p.rutas.length,
+        rutasAsignadas: p.rutas.filter((r) => r.vehiculoId != null).length,
+        rutasCerradas: p.rutas.filter((r) => r.cerrada).length,
+        areas: p.areaEstados.map((a) => ({ area: a.area, cerrado: !!a.cerrado, cerradoPor: a.cerradoPor, cerradoAt: a.cerradoAt })),
+      };
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

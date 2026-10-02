@@ -140,7 +140,7 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: "Módulos de ejecución",
+    label: "Ejecución",
     items: [
       { href: "/dashboard?panel=ejecucion", label: "Dashboard", icon: dashboardIcon },
       { href: "/ordenes", label: "Cargar Órdenes", icon: boxIcon },

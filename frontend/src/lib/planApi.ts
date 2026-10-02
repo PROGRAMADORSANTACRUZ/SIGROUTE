@@ -79,6 +79,35 @@ export interface EnvioDrivinReciente {
 export interface EnviosDrivinTendencia { serie: EnvioDrivinDia[]; ultimos: EnvioDrivinReciente[] }
 export const getEnviosDrivinTendencia = (dias = 14) => req<EnviosDrivinTendencia>(`/dashboard/envios-drivin?dias=${dias}`);
 
+// ── Históricos (pestaña "Órdenes Ejecutadas" y "Planeación") ──────────────
+export interface FacturaEnviada { numeroOrden: string; cliente: string | null; destino: string | null; placa: string | null; cantidadKg: number; valor: number; distribucion: string | null; fecha: string | null }
+export interface EnvioDrivinHistorico {
+  id: string; createdAt: string; tipo: string; usuarioNombre: string | null; exitoso: boolean;
+  placas: string | null; totalFacturas: number; totalKg: number; totalValor: number; errorMensaje: string | null;
+  facturas: FacturaEnviada[];
+}
+export const getEnviosDrivinHistorico = (params: { desde?: string; hasta?: string; buscar?: string }) => {
+  const qs = new URLSearchParams();
+  if (params.desde) qs.set("desde", params.desde);
+  if (params.hasta) qs.set("hasta", params.hasta);
+  if (params.buscar) qs.set("buscar", params.buscar);
+  return req<EnvioDrivinHistorico[]>(`/dashboard/envios-drivin-historico?${qs}`);
+};
+
+export interface AreaCierreHistorico { area: string; cerrado: boolean; cerradoPor: string | null; cerradoAt: string | null }
+export interface HistoricoPlaneacionDia {
+  fecha: string; consecutivo: number | null; estado: string | null;
+  totalKg: number; totalCanastillas: number; destinosConCarga: number;
+  rutas: number; rutasAsignadas: number; rutasCerradas: number;
+  areas: AreaCierreHistorico[];
+}
+export const getHistoricoPlaneacion = (params: { desde?: string; hasta?: string }) => {
+  const qs = new URLSearchParams();
+  if (params.desde) qs.set("desde", params.desde);
+  if (params.hasta) qs.set("hasta", params.hasta);
+  return req<HistoricoPlaneacionDia[]>(`/dashboard/historico-planeacion?${qs}`);
+};
+
 // ── Pre-planificación (facturas TAT agrupadas por ciudad o barrio) ────────
 export interface PreplanProducto { tipoComercial: string; kg: number; valor: number }
 export interface PreplanDocumento {
