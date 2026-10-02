@@ -10,6 +10,7 @@ import * as XLSXStyle from "xlsx-js-style";
 import { prismaPlan as prisma } from "../../lib/prisma";
 import { requireAuth, requirePermiso } from "../../middleware/auth";
 import { CATEGORIAS, INSTANCIA } from "../../lib/planCategorias";
+import { calcularComparativoClientes } from "./dashboard";
 
 const router = Router();
 router.use(requireAuth, requirePermiso("reportes.ver"));
@@ -480,6 +481,205 @@ router.get("/cierres-area.xlsx", requirePermiso("reportes.exportar"), async (req
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Cierres de área");
     enviarExcel(res, wb, `cierres_area_${fechaStr}_${fechaFinStr}.xlsx`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+function isoToDMY(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+
+// ── Reportes de Ejecución (antes solo había de Planeación) + Comparativo ──
+
+// GET /api/planeacion/reportes/comparativo-clientes.xlsx?fecha=
+// Mismo cálculo que el Dashboard (planificado en Programación vs ejecutado
+// en Órdenes/Diagrama), pero exportado completo (el dashboard trunca a 200
+// filas para la UI; acá van todos los clientes).
+router.get("/comparativo-clientes.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
+  try {
+    const fechaStr = typeof req.query.fecha === "string" && req.query.fecha ? req.query.fecha : new Date().toISOString().slice(0, 10);
+    const r = await calcularComparativoClientes(fechaStr);
+
+    // Hoja 1: resumen + por categoría
+    const indicadores: (string | number)[][] = [
+      ["Planificado (kg)", r.totales.planificado],
+      ["Ejecutado (kg)", r.totales.ejecutado],
+      ["Diferencia (kg)", r.totales.diferencia],
+      ["% Cumplimiento", r.totales.pctCumplimiento],
+      ["Perdido (planificado sin ejecutar, kg)", r.totales.perdido],
+      ["Extra (ejecutado sin plan, kg)", r.totales.extra],
+      ["Sin cliente identificado (kg)", r.totales.sinClienteKg],
+      [],
+    ];
+    const headersCategoria = ["Categoría", "Planificado", "Ejecutado"];
+    const bloqueResumen = bloqueTitulo(`Comparativo Planificado vs Ejecutado — ${INSTANCIA} — ${fechaStr}`, r.hayPlanificacion ? [] : ["Sin planificación cargada para esta fecha"]);
+    const filaIndicadores = bloqueResumen.length;
+    const filaEncabezadoCategoria = filaIndicadores + indicadores.length;
+    const wsResumen = XLSX.utils.aoa_to_sheet([
+      ...bloqueResumen,
+      ...indicadores,
+      headersCategoria,
+      ...r.porCategoria.map((c) => [c.etiqueta, c.planificado, c.ejecutado]),
+    ]);
+    estilizarBloqueTitulo(wsResumen, r.hayPlanificacion ? 0 : 1, 3);
+    for (let i = 0; i < 7; i++) aplicarEstilo(wsResumen, filaIndicadores + i, 0, { font: { bold: true, sz: 11 } });
+    estilizarEncabezado(wsResumen, filaEncabezadoCategoria, 3);
+    estilizarCuerpo(wsResumen, filaEncabezadoCategoria + 1, filaEncabezadoCategoria + r.porCategoria.length, 3);
+    wsResumen["!cols"] = [{ wch: 34 }, { wch: 14 }, { wch: 14 }];
+
+    // Hoja 2: por cliente (todas las filas, sin el truncado a 200 del dashboard)
+    const headersClientes = ["Cliente", "Planificado (kg)", "Ejecutado (kg)", "Diferencia (kg)", "% Desviación"];
+    const dataClientes = r.filas.map((f) => [f.nombre, f.planificado, f.ejecutado, f.diferencia, f.pctDesviacion]);
+    const bloqueClientes = bloqueTitulo(`Comparativo por cliente — ${INSTANCIA} — ${fechaStr}`);
+    const filaEncabezadoClientes = bloqueClientes.length;
+    const wsClientes = XLSX.utils.aoa_to_sheet([...bloqueClientes, headersClientes, ...dataClientes]);
+    estilizarBloqueTitulo(wsClientes, 0, headersClientes.length);
+    estilizarEncabezado(wsClientes, filaEncabezadoClientes, headersClientes.length);
+    estilizarCuerpo(wsClientes, filaEncabezadoClientes + 1, filaEncabezadoClientes + dataClientes.length, headersClientes.length);
+    wsClientes["!cols"] = anchoColumnas(headersClientes, dataClientes);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen");
+    XLSX.utils.book_append_sheet(wb, wsClientes, "Por cliente");
+    enviarExcel(res, wb, `comparativo_clientes_${fechaStr}.xlsx`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/reportes/ordenes-ejecucion.xlsx?fecha= — órdenes de
+// Ejecución (Cargar Órdenes/Diagrama) para un día: junta Orden (vivo, el día
+// de hoy que aún no pasó por el archivo de las 18:00) + OrdenHistorico (ya
+// archivado por limpiezaDiaria.ts) — igual patrón que el Comparativo, porque
+// no se sabe de antemano si la fecha pedida ya fue archivada o no.
+router.get("/ordenes-ejecucion.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
+  try {
+    const fechaStr = typeof req.query.fecha === "string" && req.query.fecha ? req.query.fecha : new Date().toISOString().slice(0, 10);
+    const fechaDMY = isoToDMY(fechaStr);
+
+    const select = {
+      fecha: true, numeroOrden: true, cliente: true, destino: true, producto: true, productoCodigo: true,
+      cantidadKg: true, valor: true, estado: true, asignadoVehiculo: true, ruta: true,
+      distribucion: true, tatOrigen: true, cufe: true,
+    } as const;
+    const [vivas, archivadas] = await Promise.all([
+      prisma.orden.findMany({ where: { fecha: fechaDMY }, select }),
+      prisma.ordenHistorico.findMany({ where: { fecha: fechaDMY }, select }),
+    ]);
+    const ordenes = [...vivas, ...archivadas];
+
+    const headers = ["Fecha", "N° Orden", "Cliente", "Destino", "Producto", "Código", "Kg", "Valor", "Estado", "Vehículo", "Ruta", "Origen", "CUFE"];
+    const dataRows: (string | number)[][] = ordenes.map((o) => [
+      o.fecha, o.numeroOrden, o.cliente, o.destino, o.producto, o.productoCodigo ?? "",
+      Math.round(o.cantidadKg * 10) / 10, Math.round(o.valor), o.estado,
+      o.asignadoVehiculo ?? "", o.ruta ?? "",
+      o.distribucion === "TAT" ? (o.tatOrigen ?? "TAT") : o.distribucion,
+      o.cufe ? "Sí" : "No",
+    ]);
+
+    const bloque = bloqueTitulo(`Órdenes de Ejecución — ${fechaStr}`, ordenes.length === 0 ? ["Sin órdenes para esta fecha"] : []);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, ordenes.length === 0 ? 1 : 0, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Órdenes");
+    enviarExcel(res, wb, `ordenes_ejecucion_${fechaStr}.xlsx`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/reportes/envios-drivin.xlsx?fecha=&fechaFin= —
+// historial DURABLE de envíos a Drivin desde Diagrama (EnvioDrivin nunca se
+// borra, a diferencia de Orden) + el detalle factura por factura de cada envío.
+router.get("/envios-drivin.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
+  try {
+    const fecha = parseFecha(req.query.fecha);
+    const fechaFin = req.query.fechaFin ? parseFecha(req.query.fechaFin) : fecha;
+    const fechaFinExclusiva = new Date(fechaFin);
+    fechaFinExclusiva.setDate(fechaFinExclusiva.getDate() + 1);
+    const fechaStr = fecha.toISOString().slice(0, 10);
+    const fechaFinStr = fechaFin.toISOString().slice(0, 10);
+
+    const envios = await prisma.envioDrivin.findMany({
+      where: { createdAt: { gte: fecha, lt: fechaFinExclusiva } },
+      include: { facturas: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const headersEnvios = ["Fecha", "Hora", "Tipo", "Usuario", "Resultado", "Placas", "Facturas", "Kg", "Valor", "Error"];
+    const dataEnvios: (string | number)[][] = envios.map((e) => [
+      e.createdAt.toLocaleDateString("es-CO"), e.createdAt.toLocaleTimeString("es-CO"),
+      e.tipo, e.usuarioNombre ?? "", e.exitoso ? "Éxito" : "Error",
+      e.placas ?? "", e.totalFacturas, Math.round(e.totalKg), Math.round(e.totalValor),
+      e.errorMensaje ?? "",
+    ]);
+    const bloqueEnvios = bloqueTitulo(`Envíos a Drivin — ${fechaStr} a ${fechaFinStr}`, envios.length === 0 ? ["Sin envíos en el rango"] : []);
+    const filaEncabezadoEnvios = bloqueEnvios.length;
+    const wsEnvios = XLSX.utils.aoa_to_sheet([...bloqueEnvios, headersEnvios, ...dataEnvios]);
+    estilizarBloqueTitulo(wsEnvios, envios.length === 0 ? 1 : 0, headersEnvios.length);
+    estilizarEncabezado(wsEnvios, filaEncabezadoEnvios, headersEnvios.length);
+    estilizarCuerpo(wsEnvios, filaEncabezadoEnvios + 1, filaEncabezadoEnvios + dataEnvios.length, headersEnvios.length);
+    wsEnvios["!cols"] = anchoColumnas(headersEnvios, dataEnvios);
+
+    const headersDetalle = ["Fecha envío", "N° Orden", "Cliente", "Destino", "Placa", "Kg", "Valor", "Origen"];
+    const dataDetalle: (string | number)[][] = envios.flatMap((e) =>
+      e.facturas.map((f) => [
+        e.createdAt.toLocaleDateString("es-CO"), f.numeroOrden, f.cliente ?? "", f.destino ?? "", f.placa ?? "",
+        Math.round(f.cantidadKg * 10) / 10, Math.round(f.valor), f.distribucion ?? "",
+      ])
+    );
+    const bloqueDetalle = bloqueTitulo(`Envíos a Drivin — Detalle de facturas — ${fechaStr} a ${fechaFinStr}`);
+    const filaEncabezadoDetalle = bloqueDetalle.length;
+    const wsDetalle = XLSX.utils.aoa_to_sheet([...bloqueDetalle, headersDetalle, ...dataDetalle]);
+    estilizarBloqueTitulo(wsDetalle, 0, headersDetalle.length);
+    estilizarEncabezado(wsDetalle, filaEncabezadoDetalle, headersDetalle.length);
+    estilizarCuerpo(wsDetalle, filaEncabezadoDetalle + 1, filaEncabezadoDetalle + dataDetalle.length, headersDetalle.length);
+    wsDetalle["!cols"] = anchoColumnas(headersDetalle, dataDetalle);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsEnvios, "Envíos");
+    XLSX.utils.book_append_sheet(wb, wsDetalle, "Detalle facturas");
+    enviarExcel(res, wb, `envios_drivin_${fechaStr}_${fechaFinStr}.xlsx`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/reportes/novedades.xlsx?fecha= — Nivel de servicio
+// (Ejecución): novedades/incidencias reportadas para ese día.
+router.get("/novedades.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
+  try {
+    const fechaStr = typeof req.query.fecha === "string" && req.query.fecha ? req.query.fecha : new Date().toISOString().slice(0, 10);
+    const fechaDMY = isoToDMY(fechaStr);
+
+    const registros = await prisma.novedad.findMany({ where: { fecha: fechaDMY }, orderBy: { createdAt: "asc" } });
+
+    const headers = ["N°", "Tipo", "Prioridad", "Estado", "Estado entrega", "Cliente", "N° Orden", "Placa", "Conductor", "Auxiliar", "Descripción", "Resolución"];
+    const dataRows: (string | number)[][] = registros.map((r) => [
+      r.consecutivo, r.tipo, r.prioridad, r.estado, r.estadoEntrega, r.cliente ?? "", r.numeroOrden ?? "",
+      r.placa ?? "", r.conductor ?? "", r.auxiliarRuta ?? "", r.descripcion, r.resolucion ?? "",
+    ]);
+
+    const bloque = bloqueTitulo(`Nivel de Servicio — Novedades — ${fechaStr}`, registros.length === 0 ? ["Sin novedades para esta fecha"] : []);
+    const filaEncabezado = bloque.length;
+    const ws = XLSX.utils.aoa_to_sheet([...bloque, headers, ...dataRows]);
+    const nCols = headers.length;
+    estilizarBloqueTitulo(ws, registros.length === 0 ? 1 : 0, nCols);
+    estilizarEncabezado(ws, filaEncabezado, nCols);
+    estilizarCuerpo(ws, filaEncabezado + 1, filaEncabezado + dataRows.length, nCols);
+    ws["!cols"] = anchoColumnas(headers, dataRows);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Novedades");
+    enviarExcel(res, wb, `novedades_${fechaStr}.xlsx`);
   } catch (err) {
     next(err);
   }

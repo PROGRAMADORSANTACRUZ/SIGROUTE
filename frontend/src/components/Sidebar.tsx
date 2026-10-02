@@ -144,7 +144,6 @@ const navGroups: NavGroup[] = [
       { href: "/planeacion/areas", label: "Áreas para Cargar", icon: checkIcon },
       { href: "/planeacion/distribucion-produccion", label: "Distribución Producción", icon: boxIcon },
       { href: "/planeacion/simulador", label: "Simulador de Producción", icon: diagramaIcon },
-      { href: "/planeacion/reportes", label: "Reportes", icon: historyIcon },
     ],
   },
   {
@@ -176,6 +175,7 @@ const navGroups: NavGroup[] = [
       { href: "/configuracion/usuarios", label: "Usuarios", icon: usersIcon },
       { href: "/configuracion/roles", label: "Roles y permisos", icon: gearIcon },
       { href: "/configuracion/auditoria", label: "Auditoría", icon: clipboardIcon },
+      { href: "/configuracion/reportes", label: "Reportes", icon: historyIcon },
       { href: "/configuracion/clientes", label: "Clientes", icon: clientesIcon },
       { href: "/configuracion/vehiculos", label: "Vehículos", icon: truckIcon },
       { href: "/configuracion/conductores", label: "Conductores", icon: usersIcon },

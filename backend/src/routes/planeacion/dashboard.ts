@@ -214,6 +214,98 @@ function categoriaDeOrden(o: { distribucion: string; tatOrigen: string | null; n
   return { kls: "klsOtros", can: "canastillasOtros", clave: "otros" };
 }
 
+// Calcula el comparativo por cliente (planificado en Programación vs
+// ejecutado/enviado a Drivin) para una fecha — extraído a función propia
+// (compartida por este endpoint y por el reporte Excel de Configuración >
+// Reportes) para no duplicar esta lógica de cruce. Devuelve TODAS las filas
+// (sin truncar); el endpoint JSON del dashboard sí las trunca a 200 para no
+// saturar la UI.
+export async function calcularComparativoClientes(fechaStr: string) {
+  const fechaDate = new Date(fechaStr);
+  fechaDate.setHours(0, 0, 0, 0);
+
+  const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha: fechaDate } } });
+  const detalle = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id } }) : [];
+
+  const ordenes = await ordenesEjecutadasEnFecha(isoToDMY(fechaStr));
+
+  const planPorCliente = new Map<string, { total: number; porCategoria: Record<string, number> }>();
+  for (const d of detalle) {
+    if (!d.clienteId) continue;
+    const porCategoria: Record<string, number> = {};
+    let total = 0;
+    for (const c of CATEGORIAS) {
+      const v = Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0);
+      porCategoria[c.clave] = v;
+      total += v;
+    }
+    planPorCliente.set(d.clienteId, { total, porCategoria });
+  }
+
+  const ejecPorCliente = new Map<string, { total: number; porCategoria: Record<string, number>; nombre: string }>();
+  let sinClienteKg = 0;
+  for (const o of ordenes) {
+    const kg = o.cantidadKg;
+    if (!o.clienteSistemaId) { sinClienteKg += kg; continue; }
+    const cat = categoriaDeOrden(o);
+    const ex = ejecPorCliente.get(o.clienteSistemaId) ?? { total: 0, porCategoria: {}, nombre: o.cliente };
+    ex.total += kg;
+    ex.porCategoria[cat.clave] = (ex.porCategoria[cat.clave] ?? 0) + kg;
+    ejecPorCliente.set(o.clienteSistemaId, ex);
+  }
+
+  const clienteIds = new Set([...planPorCliente.keys(), ...ejecPorCliente.keys()]);
+  const clientesInfo = clienteIds.size
+    ? await prisma.cliente.findMany({ where: { id: { in: [...clienteIds] } }, select: { id: true, cliente: true, nombreDireccion: true } })
+    : [];
+  const nombrePorId = new Map(clientesInfo.map((c) => [c.id, c.cliente || c.nombreDireccion || "(sin nombre)"]));
+
+  const filas = [...clienteIds].map((id) => {
+    const plan = planPorCliente.get(id)?.total ?? 0;
+    const ejec = ejecPorCliente.get(id)?.total ?? 0;
+    const diferencia = ejec - plan;
+    const pctDesviacion = plan > 0 ? Math.round((diferencia / plan) * 100) : (ejec > 0 ? 100 : 0);
+    return {
+      clienteId: id,
+      nombre: nombrePorId.get(id) ?? ejecPorCliente.get(id)?.nombre ?? "(sin nombre)",
+      planificado: Math.round(plan * 10) / 10,
+      ejecutado: Math.round(ejec * 10) / 10,
+      diferencia: Math.round(diferencia * 10) / 10,
+      pctDesviacion,
+    };
+  }).sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+
+  const totalPlan = filas.reduce((s, f) => s + f.planificado, 0);
+  const totalEjec = filas.reduce((s, f) => s + f.ejecutado, 0);
+  // "Perdido" = lo planificado que no llegó a ejecutarse (no cuenta lo
+  // ejecutado sin plan previo — eso es "extra", no una pérdida).
+  const perdido = filas.reduce((s, f) => s + Math.max(0, f.planificado - f.ejecutado), 0);
+  const extra = filas.reduce((s, f) => s + Math.max(0, f.ejecutado - f.planificado), 0);
+
+  const porCategoria = CATEGORIAS.map((c) => ({
+    clave: c.clave,
+    etiqueta: c.etiqueta,
+    planificado: Math.round([...planPorCliente.values()].reduce((s, p) => s + (p.porCategoria[c.clave] ?? 0), 0)),
+    ejecutado: Math.round([...ejecPorCliente.values()].reduce((s, e) => s + (e.porCategoria[c.clave] ?? 0), 0)),
+  }));
+
+  return {
+    fecha: fechaStr,
+    hayPlanificacion: detalle.some((d) => CATEGORIAS.some((c) => Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0) > 0)),
+    totales: {
+      planificado: Math.round(totalPlan),
+      ejecutado: Math.round(totalEjec),
+      diferencia: Math.round(totalEjec - totalPlan),
+      pctCumplimiento: totalPlan > 0 ? Math.round((totalEjec / totalPlan) * 100) : (totalEjec > 0 ? 100 : 0),
+      perdido: Math.round(perdido),
+      extra: Math.round(extra),
+      sinClienteKg: Math.round(sinClienteKg),
+    },
+    porCategoria,
+    filas,
+  };
+}
+
 // GET /api/planeacion/dashboard/comparativo-clientes?fecha=YYYY-MM-DD
 // A diferencia de /comparativo (por vehículo/placa), este cruza por CLIENTE:
 // ProgDetalle.clienteId === Orden.clienteSistemaId (mismo Cliente.id, BD ya
@@ -223,89 +315,8 @@ function categoriaDeOrden(o: { distribucion: string; tatOrigen: string | null; n
 router.get("/comparativo-clientes", async (req, res, next) => {
   try {
     const fechaStr = typeof req.query.fecha === "string" && req.query.fecha ? req.query.fecha : new Date().toISOString().slice(0, 10);
-    const fechaDate = new Date(fechaStr);
-    fechaDate.setHours(0, 0, 0, 0);
-
-    const prog = await prisma.programacion.findUnique({ where: { instancia_fecha: { instancia: INSTANCIA, fecha: fechaDate } } });
-    const detalle = prog ? await prisma.progDetalle.findMany({ where: { progId: prog.id } }) : [];
-
-    const ordenes = await ordenesEjecutadasEnFecha(isoToDMY(fechaStr));
-
-    const planPorCliente = new Map<string, { total: number; porCategoria: Record<string, number> }>();
-    for (const d of detalle) {
-      if (!d.clienteId) continue;
-      const porCategoria: Record<string, number> = {};
-      let total = 0;
-      for (const c of CATEGORIAS) {
-        const v = Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0);
-        porCategoria[c.clave] = v;
-        total += v;
-      }
-      planPorCliente.set(d.clienteId, { total, porCategoria });
-    }
-
-    const ejecPorCliente = new Map<string, { total: number; porCategoria: Record<string, number>; nombre: string }>();
-    let sinClienteKg = 0;
-    for (const o of ordenes) {
-      const kg = o.cantidadKg;
-      if (!o.clienteSistemaId) { sinClienteKg += kg; continue; }
-      const cat = categoriaDeOrden(o);
-      const ex = ejecPorCliente.get(o.clienteSistemaId) ?? { total: 0, porCategoria: {}, nombre: o.cliente };
-      ex.total += kg;
-      ex.porCategoria[cat.clave] = (ex.porCategoria[cat.clave] ?? 0) + kg;
-      ejecPorCliente.set(o.clienteSistemaId, ex);
-    }
-
-    const clienteIds = new Set([...planPorCliente.keys(), ...ejecPorCliente.keys()]);
-    const clientesInfo = clienteIds.size
-      ? await prisma.cliente.findMany({ where: { id: { in: [...clienteIds] } }, select: { id: true, cliente: true, nombreDireccion: true } })
-      : [];
-    const nombrePorId = new Map(clientesInfo.map((c) => [c.id, c.cliente || c.nombreDireccion || "(sin nombre)"]));
-
-    const filas = [...clienteIds].map((id) => {
-      const plan = planPorCliente.get(id)?.total ?? 0;
-      const ejec = ejecPorCliente.get(id)?.total ?? 0;
-      const diferencia = ejec - plan;
-      const pctDesviacion = plan > 0 ? Math.round((diferencia / plan) * 100) : (ejec > 0 ? 100 : 0);
-      return {
-        clienteId: id,
-        nombre: nombrePorId.get(id) ?? ejecPorCliente.get(id)?.nombre ?? "(sin nombre)",
-        planificado: Math.round(plan * 10) / 10,
-        ejecutado: Math.round(ejec * 10) / 10,
-        diferencia: Math.round(diferencia * 10) / 10,
-        pctDesviacion,
-      };
-    }).sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
-
-    const totalPlan = filas.reduce((s, f) => s + f.planificado, 0);
-    const totalEjec = filas.reduce((s, f) => s + f.ejecutado, 0);
-    // "Perdido" = lo planificado que no llegó a ejecutarse (no cuenta lo
-    // ejecutado sin plan previo — eso es "extra", no una pérdida).
-    const perdido = filas.reduce((s, f) => s + Math.max(0, f.planificado - f.ejecutado), 0);
-    const extra = filas.reduce((s, f) => s + Math.max(0, f.ejecutado - f.planificado), 0);
-
-    const porCategoria = CATEGORIAS.map((c) => ({
-      clave: c.clave,
-      etiqueta: c.etiqueta,
-      planificado: Math.round([...planPorCliente.values()].reduce((s, p) => s + (p.porCategoria[c.clave] ?? 0), 0)),
-      ejecutado: Math.round([...ejecPorCliente.values()].reduce((s, e) => s + (e.porCategoria[c.clave] ?? 0), 0)),
-    }));
-
-    res.json({
-      fecha: fechaStr,
-      hayPlanificacion: detalle.some((d) => CATEGORIAS.some((c) => Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0) > 0)),
-      totales: {
-        planificado: Math.round(totalPlan),
-        ejecutado: Math.round(totalEjec),
-        diferencia: Math.round(totalEjec - totalPlan),
-        pctCumplimiento: totalPlan > 0 ? Math.round((totalEjec / totalPlan) * 100) : (totalEjec > 0 ? 100 : 0),
-        perdido: Math.round(perdido),
-        extra: Math.round(extra),
-        sinClienteKg: Math.round(sinClienteKg),
-      },
-      porCategoria,
-      filas: filas.slice(0, 200),
-    });
+    const r = await calcularComparativoClientes(fechaStr);
+    res.json({ ...r, filas: r.filas.slice(0, 200) });
   } catch (err) {
     next(err);
   }

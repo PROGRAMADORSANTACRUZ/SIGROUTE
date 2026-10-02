@@ -19,7 +19,6 @@ export const MODULOS: Modulo[] = [
   { key: "/planeacion/areas", label: "Áreas para Cargar", grupo: "Planeación", permiso: "areas.ver" },
   { key: "/planeacion/distribucion-produccion", label: "Distribución Producción", grupo: "Planeación", permiso: "distribucion.ver" },
   { key: "/planeacion/simulador", label: "Simulador de Producción", grupo: "Planeación", permiso: "simulador.ver" },
-  { key: "/planeacion/reportes", label: "Reportes", grupo: "Planeación", permiso: "reportes.ver" },
 
   // ── Módulos de ejecución (DISTRILOG + Plantillas TAT, ambos bajo el mismo panel) ─
   { key: "/dashboard?panel=ejecucion", label: "Dashboard", grupo: "Ejecución", permiso: "dashboard.ejecucion.ver" },
@@ -35,6 +34,7 @@ export const MODULOS: Modulo[] = [
 
   // ── Configuración (catálogos de Planeación y de Ejecución, unificados) ─
   { key: "/configuracion/auditoria", label: "Auditoría", grupo: "Configuración", permiso: "auditoria.ver" },
+  { key: "/configuracion/reportes", label: "Reportes", grupo: "Configuración", permiso: "reportes.ver" },
   { key: "/configuracion/usuarios", label: "Usuarios", grupo: "Configuración", permiso: "usuarios.ver" },
   { key: "/configuracion/roles", label: "Roles y permisos", grupo: "Configuración", permiso: "usuarios.roles" },
   { key: "/configuracion/clientes", label: "Clientes", grupo: "Configuración", permiso: "config.clientes.ver" },

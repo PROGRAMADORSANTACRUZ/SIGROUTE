@@ -860,7 +860,7 @@ function DashboardPageInner() {
               { href: "/planeacion/asignacion", label: "Preasignación", sub: `${resumenPlan?.conteos.rutas ?? 0} rutas`, color: "bg-[#f7faf5]" },
               { href: "/planeacion/distribucion-produccion", label: "Distribución Producción", sub: "previsualizar / exportar", color: "bg-[#f7faf5]" },
               { href: "/planeacion/simulador", label: "Simulador de Producción", sub: "corridas de perfil", color: "bg-[#f7faf5]" },
-              { href: "/planeacion/reportes", label: "Reportes", sub: "descargar Excel", color: "bg-[#f7faf5]" },
+              { href: "/configuracion/reportes", label: "Reportes", sub: "descargar Excel", color: "bg-[#f7faf5]" },
             ].map((item) => (
               <Link key={item.href} href={item.href} className={`flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#e1e9dd] ${item.color} px-4 py-2 transition-all hover:border-[#2f8f4e] hover:shadow-sm lg:flex-1`}>
                 <span className="whitespace-nowrap text-xs font-semibold text-[#14352a]">{item.label}</span>

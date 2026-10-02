@@ -30,7 +30,6 @@ export const MODULOS: ModuloGrupo[] = [
       { label: "Áreas para Cargar", claves: ["areas.ver", "areas.confirmar_carga", "areas.reabrir_carga", "areas.editar_kls", "areas.exportar"] },
       { label: "Resumen del Día", claves: ["resumen.ver", "resumen.exportar"] },
       { label: "Maestros", claves: ["maestros.ver", "maestros.editar", "maestros.eliminar"] },
-      { label: "Reportes", claves: ["reportes.ver", "reportes.exportar"] },
     ],
   },
   {
@@ -55,6 +54,10 @@ export const MODULOS: ModuloGrupo[] = [
     submodulos: [
       { label: "Usuarios y roles", claves: ["usuarios.ver", "usuarios.crear", "usuarios.editar", "usuarios.roles"] },
       { label: "Auditoría", claves: ["auditoria.ver"] },
+      // Reportes es transversal: cruza datos de Planeación Y Ejecución (más
+      // comparativos entre ambos), por eso vive en Configuración y no en un
+      // dominio solo.
+      { label: "Reportes", claves: ["reportes.ver", "reportes.exportar"] },
       { label: "Clientes", claves: ["config.clientes.ver", "config.clientes.editar"] },
       { label: "Vehículos", claves: ["config.vehiculos.ver", "config.vehiculos.editar"] },
       { label: "Conductores", claves: ["config.conductores.ver", "config.conductores.editar"] },

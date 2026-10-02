@@ -200,7 +200,12 @@ export const setEstadoAreaCarga = (rutaId: number, area: string, estado: string)
 export const getResumen = (fecha: string) => req(`/resumen?fecha=${fecha}`);
 
 // ── Reportes ─────────────────────────────────────────────────────────────
-export type TipoReporte = "programacion" | "rutas" | "resumen" | "areas-carga" | "auditoria" | "cierres-area";
+// Unificado en Configuración: reportes de Planeación, Ejecución y sus
+// comparativos (antes solo había de Planeación, y vivía bajo Planeación).
+export type TipoReporte =
+  | "programacion" | "rutas" | "resumen" | "areas-carga" | "auditoria" | "cierres-area"
+  | "ordenes-ejecucion" | "envios-drivin" | "novedades"
+  | "comparativo-clientes";
 export async function descargarReporte(tipo: TipoReporte, fecha: string, fechaFin?: string) {
   const qs = new URLSearchParams({ fecha });
   if (fechaFin) qs.set("fechaFin", fechaFin);
