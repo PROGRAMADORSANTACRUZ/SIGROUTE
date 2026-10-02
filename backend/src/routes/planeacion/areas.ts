@@ -83,14 +83,17 @@ router.get("/", async (req, res, next) => {
       const kls = detalle.reduce((acc, d) => acc + sumaDetalle(d as unknown as Record<string, unknown>, KLS_ALL), 0);
       const can = detalle.reduce((acc, d) => acc + sumaDetalle(d as unknown as Record<string, unknown>, CAN_ALL), 0);
 
-      const celdas: Record<string, string> = {};
+      const celdas: Record<string, { estado: string; at: string | null }> = {};
       for (const c of CATEGORIAS) {
         const k = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.kls] ?? 0), 0);
         const cc = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.can] ?? 0), 0);
         if (k > 0 || cc > 0) {
           if (visibles === null || visibles.includes(c.etiqueta)) {
             const est = r.areaCarga.find((a) => a.area === c.etiqueta);
-            celdas[c.etiqueta] = est?.estado ?? "PENDIENTE";
+            // actualizadoAt siempre refleja el último cambio de estado de esta
+            // celda -- si el estado actual es CARGADA, esa es justo la hora en
+            // que se confirmó la carga.
+            celdas[c.etiqueta] = { estado: est?.estado ?? "PENDIENTE", at: est?.actualizadoAt ? est.actualizadoAt.toISOString() : null };
             presentes.add(c.etiqueta);
           }
         }
@@ -142,6 +145,10 @@ router.post("/:rutaId/estado", requirePermiso("areas.confirmar_carga"), async (r
       update: { estado, actualizadoPor: req.user!.username, actualizadoAt: new Date() },
       create: { rutaId, area, estado, actualizadoPor: req.user!.username, actualizadoAt: new Date() },
     });
+    // Historial completo (nunca se sobreescribe) -- a diferencia del upsert de
+    // arriba, esto preserva CADA transición aunque se reabra y se vuelva a
+    // cargar el mismo día, para poder reportar la hora real de cada evento.
+    await prisma.rutaAreaCargaEvento.create({ data: { rutaId, area, estado, usuario: req.user!.username } });
     const completo = await syncRutaCargada(rutaId, ruta.progId, req.user!.username);
     await auditLog(req.user!.username, "CARGA", "Áreas para Cargar", `Ruta #${ruta.numeroRuta} · ${area} → ${estado}`, INSTANCIA);
     res.json({ ok: true, rutaCargada: completo });

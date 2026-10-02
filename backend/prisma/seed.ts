@@ -8,6 +8,7 @@ const ROLES = [
   { nombre: "SUPERVISOR", descripcion: "Supervisión y reportes" },
   { nombre: "OPERADOR", descripcion: "Operaciones del día a día" },
   { nombre: "CONSULTA", descripcion: "Solo lectura" },
+  { nombre: "CONDUCTOR", descripcion: "Solo ve en qué puertos de cargue debe cargar (Areas para Cargar), sin poder cambiar estados" },
 ];
 
 const PERMISOS: [string, string][] = [
@@ -110,6 +111,11 @@ const CONSULTA_CLAVES = [
   "config.auxiliares.ver", "config.rutas.ver", "config.plan_nombres.ver",
 ];
 
+// Solo ve "Áreas para Cargar" (en qué puerto/área debe cargar cada vehículo) --
+// SIN areas.confirmar_carga/areas.reabrir_carga, así que no puede cambiar
+// ningún estado (eso sigue siendo exclusivo de despacho/OPERADOR).
+const CONDUCTOR_CLAVES = ["areas.ver"];
+
 async function main() {
   for (const r of ROLES) {
     await prisma.rol.upsert({ where: { nombre: r.nombre }, update: {}, create: r });
@@ -145,6 +151,7 @@ async function main() {
   );
   await asignar("OPERADOR", OPERADOR_CLAVES);
   await asignar("CONSULTA", CONSULTA_CLAVES);
+  await asignar("CONDUCTOR", CONDUCTOR_CLAVES);
 
   // Usuario admin semilla (contraseña temporal "Admin2024*"), mismo hash pbkdf2
   // que el seed original de rutas_web — debe cambiarla en el primer ingreso.

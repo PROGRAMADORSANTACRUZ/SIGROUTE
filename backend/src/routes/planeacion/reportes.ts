@@ -237,7 +237,12 @@ router.get("/areas-carga.xlsx", requirePermiso("reportes.exportar"), async (req,
         const cc = detalle.reduce((acc, d) => acc + Number((d as unknown as Record<string, unknown>)[c.can] ?? 0), 0);
         if (k > 0 || cc > 0) {
           const est = r.areaCarga.find((a) => a.area === c.etiqueta);
-          celdas[c.etiqueta] = est?.estado ?? "PENDIENTE";
+          // La hora solo aporta algo cuando ya está CARGADA (si no, es solo
+          // "cuándo se tocó por última vez" un estado intermedio sin interés).
+          const hora = est?.estado === "CARGADA" && est.actualizadoAt
+            ? ` (${est.actualizadoAt.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })})`
+            : "";
+          celdas[c.etiqueta] = (est?.estado ?? "PENDIENTE") + hora;
           presentes.add(c.etiqueta);
         }
       }
@@ -283,6 +288,48 @@ router.get("/auditoria.xlsx", requirePermiso("reportes.exportar"), async (req, r
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Auditoría");
     enviarExcel(res, wb, `auditoria_${fecha.toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/planeacion/reportes/cierres-area.xlsx?fecha=&fechaFin= — histórico
+// de a qué hora se cerró/reabrió cada área de Programación, día por día
+// (AreaEstado ya guarda cerradoAt/cerradoPor por cada Programacion/día; esto
+// solo lo recorre en un rango en vez de un único día).
+router.get("/cierres-area.xlsx", requirePermiso("reportes.exportar"), async (req, res, next) => {
+  try {
+    const fecha = parseFecha(req.query.fecha);
+    const fechaFin = req.query.fechaFin ? parseFecha(req.query.fechaFin) : fecha;
+
+    const programaciones = await prisma.programacion.findMany({
+      where: { instancia: INSTANCIA, fecha: { gte: fecha, lte: fechaFin } },
+      include: { areaEstados: true },
+      orderBy: { fecha: "asc" },
+    });
+
+    const rows: (string | number)[][] = [
+      [`Cierres de área — ${INSTANCIA} — ${fecha.toISOString().slice(0, 10)} a ${fechaFin.toISOString().slice(0, 10)}`],
+      [],
+      ["Fecha", "Área", "Estado", "Cerrado por", "Hora de cierre"],
+    ];
+    for (const prog of programaciones) {
+      const porArea = new Map(prog.areaEstados.map((e) => [e.area, e]));
+      for (const c of CATEGORIAS) {
+        const e = porArea.get(c.etiqueta);
+        rows.push([
+          prog.fecha.toISOString().slice(0, 10),
+          c.etiqueta,
+          e?.cerrado ? "Cerrada" : "Abierta",
+          e?.cerradoPor ?? "",
+          e?.cerradoAt ? e.cerradoAt.toLocaleString("es-CO") : "",
+        ]);
+      }
+    }
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Cierres de área");
+    enviarExcel(res, wb, `cierres_area_${fecha.toISOString().slice(0, 10)}_${fechaFin.toISOString().slice(0, 10)}.xlsx`);
   } catch (err) {
     next(err);
   }

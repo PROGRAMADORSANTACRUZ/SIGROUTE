@@ -192,6 +192,7 @@ const roleLabels: Record<string, string> = {
   SUPERVISOR: "Supervisor",
   OPERADOR: "Operador",
   CONSULTA: "Consulta",
+  CONDUCTOR: "Conductor",
 };
 
 export default function Sidebar({

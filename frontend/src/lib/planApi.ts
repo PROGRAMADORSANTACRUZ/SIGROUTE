@@ -200,13 +200,15 @@ export const setEstadoAreaCarga = (rutaId: number, area: string, estado: string)
 export const getResumen = (fecha: string) => req(`/resumen?fecha=${fecha}`);
 
 // ── Reportes ─────────────────────────────────────────────────────────────
-export type TipoReporte = "programacion" | "rutas" | "resumen" | "areas-carga" | "auditoria";
-export async function descargarReporte(tipo: TipoReporte, fecha: string) {
-  const blob = await req<Blob>(`/reportes/${tipo}.xlsx?fecha=${fecha}`);
+export type TipoReporte = "programacion" | "rutas" | "resumen" | "areas-carga" | "auditoria" | "cierres-area";
+export async function descargarReporte(tipo: TipoReporte, fecha: string, fechaFin?: string) {
+  const qs = new URLSearchParams({ fecha });
+  if (fechaFin) qs.set("fechaFin", fechaFin);
+  const blob = await req<Blob>(`/reportes/${tipo}.xlsx?${qs}`);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${tipo}_${fecha}.xlsx`;
+  a.download = `${tipo}_${fecha}${fechaFin && fechaFin !== fecha ? `_${fechaFin}` : ""}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -30,7 +30,7 @@ interface RutaAreaCarga {
   cargada: boolean;
   kls: number;
   canastillas: number;
-  celdas: Record<string, Estado>;
+  celdas: Record<string, { estado: Estado; at: string | null }>;
 }
 
 interface AreasCargaData {
@@ -135,12 +135,15 @@ export default function AreasParaCargarPage() {
                     <td className="px-3 py-2 text-right tabular-nums">{r.kls.toLocaleString("es-CO", { maximumFractionDigits: 0 })}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.canastillas.toLocaleString("es-CO")}</td>
                     {data.columnas.map((c) => {
-                      const estado = r.celdas[c];
-                      if (!estado) return <td key={c} className="px-3 py-2 text-center text-[#c8d0c9]">—</td>;
+                      const celda = r.celdas[c];
+                      if (!celda) return <td key={c} className="px-3 py-2 text-center text-[#c8d0c9]">—</td>;
+                      const { estado, at } = celda;
+                      const hora = at ? new Date(at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : null;
+                      const titulo = hora ? `${estado} — ${hora}` : estado;
                       return (
                         <td key={c} className="px-3 py-2 text-center">
                           {puedeConfirmar ? (
-                            <div className="relative inline-flex h-5 w-5 items-center justify-center" title={estado}>
+                            <div className="relative inline-flex h-5 w-5 items-center justify-center" title={titulo}>
                               <span className={`h-3.5 w-3.5 rounded-full ${ESTADO_SEMAFORO[estado]}`} />
                               <select
                                 value={estado}
@@ -152,7 +155,10 @@ export default function AreasParaCargarPage() {
                               </select>
                             </div>
                           ) : (
-                            <span className={`inline-block h-3.5 w-3.5 rounded-full ${ESTADO_SEMAFORO[estado]}`} title={estado} />
+                            <span className="inline-flex flex-col items-center gap-0.5">
+                              <span className={`inline-block h-3.5 w-3.5 rounded-full ${ESTADO_SEMAFORO[estado]}`} title={titulo} />
+                              {hora && <span className="text-[10px] text-[#9aa4af]">{hora}</span>}
+                            </span>
                           )}
                         </td>
                       );

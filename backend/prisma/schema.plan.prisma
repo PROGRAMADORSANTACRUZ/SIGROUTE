@@ -289,6 +289,7 @@ model PlanRuta {
   remisiones    RutaRemision[]
   docAreaEstado RutaDocAreaEstado[]
   areaCarga     RutaAreaCarga[]
+  areaCargaEventos RutaAreaCargaEvento[]
   cumplimiento  RutaCumplimiento?
 
   @@unique([progId, numeroRuta])
@@ -429,6 +430,26 @@ model RutaAreaCarga {
 
   @@id([rutaId, area])
   @@map("ruta_area_carga")
+}
+
+// Historial COMPLETO (nunca se sobreescribe) de cada cambio de estado de un
+// área de cargue por ruta -- a diferencia de RutaAreaCarga (que solo guarda
+// el estado ACTUAL), esto permite reportar a qué hora exacta cada vehículo
+// pasó a CARGADA en cada área, incluso si luego se reabrió y se volvió a
+// cargar el mismo día.
+model RutaAreaCargaEvento {
+  id      Int      @id @default(autoincrement())
+  rutaId  Int      @map("ruta_id")
+  area    String   @db.VarChar(50)
+  estado  String   @db.VarChar(20)
+  usuario String?  @db.VarChar(100)
+  at      DateTime @default(now())
+
+  ruta PlanRuta @relation(fields: [rutaId], references: [id], onDelete: Cascade)
+
+  @@index([rutaId, area])
+  @@index([at])
+  @@map("ruta_area_carga_eventos")
 }
 
 // Legado — retirado de la UI pero conservado por compatibilidad de datos.

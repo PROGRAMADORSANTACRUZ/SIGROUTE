@@ -30,6 +30,7 @@ interface GridData {
   categorias: Categoria[];
   editables: string[] | null;
   cerradas: Record<string, string>;
+  cerradasInfo: Record<string, { por: string | null; at: string | null }>;
   misAreas: string[];
   canCerrar: boolean;
   canReabrir: boolean;
@@ -243,10 +244,15 @@ export default function ProgramacionPage() {
             {data.categorias.map((c) => {
               const cerrada = c.etiqueta in data.cerradas;
               const puedeGestionar = data.misAreas.includes(c.etiqueta);
+              const info = data.cerradasInfo?.[c.etiqueta];
+              const hora = info?.at ? new Date(info.at).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : null;
               return (
                 <div key={c.clave} className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs ${cerrada ? "border-[#f0c4c1] bg-[#fbeceb] text-[#b3261e]" : "border-[#dfe4e0] bg-white text-[#45505e]"}`}>
                   <span className="font-medium">{c.etiqueta}</span>
                   <span className="inline-flex items-center gap-1">{cerrada ? IconLock : IconLockOpen} {cerrada ? "Cerrada" : "Abierta"}</span>
+                  {cerrada && hora && (
+                    <span className="text-[#8a5a56]">· {info?.por ?? "?"} a las {hora}</span>
+                  )}
                   {puedeGestionar && data.canCerrar && !cerrada && (
                     <button onClick={async () => { if (await confirm({ title: `¿Cerrar el área ${c.etiqueta}?` })) cerrarArea(fecha, c.etiqueta).then(cargar); }} className="font-medium text-[#2f8f4e] hover:underline">Cerrar</button>
                   )}
