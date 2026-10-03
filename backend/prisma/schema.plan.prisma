@@ -820,6 +820,17 @@ model Orden {
 
   clienteSistemaId String?
 
+  // Datos EXACTOS como vienen de la factura real (Siesa), SIN cruzar con el
+  // maestro de Clientes GS/TAT -- requerimiento: la factura/remisión impresa
+  // SIEMPRE debe mostrar esto, nunca el nombre/NIT/dirección "resueltos"
+  // internamente (cliente/nit/direccion de arriba sí pueden venir del
+  // maestro, para uso interno de ruteo/Drivin). Se llenan al cargar la
+  // factura (TAT/Inversiones) o al cruzar con Siesa (Bovino/Porcino, ver
+  // sincronizarAgropecuaria); quedan null si aún no hay factura Siesa real.
+  clienteFactura   String?
+  nitFactura       String?
+  direccionFactura String?
+
   distribucion String  @default("AGROPECUARIA")
   tatOrigen    String?
 
@@ -1146,6 +1157,9 @@ model OrdenHistorico {
   vendedor         String?
   ciudad           String?
   clienteSistemaId String?
+  clienteFactura   String?
+  nitFactura       String?
+  direccionFactura String?
   distribucion     String
   tatOrigen        String?
   cufe             String?

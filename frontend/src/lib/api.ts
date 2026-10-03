@@ -286,6 +286,15 @@ export interface Orden {
   valor: number;
   direccion: string | null;
   vendedor: string | null;
+  // Exactamente como viene la factura real de Siesa, sin cruzar con el
+  // maestro GS/TAT (cliente/nit/direccion de arriba sí pueden venir del
+  // maestro) -- usar ESTOS campos al imprimir la factura/remisión, nunca los
+  // de arriba, por requerimiento del negocio. Null si aún no hay factura real
+  // de Siesa para esta línea (ej. Bovino/Porcino recién importado por Excel,
+  // antes de que corra la sincronización nocturna).
+  clienteFactura?: string | null;
+  nitFactura?: string | null;
+  direccionFactura?: string | null;
   // Ciudad real del cliente (maestro TAT); Orden.destino en TAT es una clave
   // de agrupacion/asignacion (a veces el mismo codigo del cliente), NO una
   // ciudad -- usar este campo para mostrar ciudad en documentos impresos.

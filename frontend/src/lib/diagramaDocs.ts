@@ -323,6 +323,13 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
   const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
   const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
   const verificada = Boolean(primera.cufe && primera.qrTexto);
+  // Requerimiento del negocio: la factura/remisión SIEMPRE debe mostrar el
+  // dato EXACTO de la factura real de Siesa, no el nombre/nit/dirección ya
+  // cruzados con el maestro GS/TAT -- cae a los campos resueltos solo si aún
+  // no hay snapshot de Siesa (p.ej. orden recién cargada sin factura real).
+  const nombreFactura = (primera.clienteFactura || primera.cliente).toUpperCase();
+  const nitMostrar = primera.nitFactura ?? primera.nit ?? "—";
+  const direccionMostrar = primera.direccionFactura ?? primera.direccion ?? "—";
 
   const filas = lineas.map((l) => {
     const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
@@ -367,13 +374,13 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
       </tr>
     </table>
     <table class="agro-info">
-      <tr><td class="lbl">NOMBRE CLIENTE:</td><td colspan="3"><b>${esc(primera.cliente.toUpperCase())}</b></td></tr>
+      <tr><td class="lbl">NOMBRE CLIENTE:</td><td colspan="3"><b>${esc(nombreFactura)}</b></td></tr>
       <tr>
-        <td class="lbl">NIT:</td><td>${esc(primera.nit ?? "—")}</td>
+        <td class="lbl">NIT:</td><td>${esc(nitMostrar)}</td>
         <td class="lbl">FORMA DE PAGO:</td><td>CONTADO</td>
       </tr>
       <tr>
-        <td class="lbl">DIRECCION:</td><td>${esc(primera.direccion ?? "—")}</td>
+        <td class="lbl">DIRECCION:</td><td>${esc(direccionMostrar)}</td>
         <td class="lbl">MEDIO DE PAGO:</td><td>CONTADO</td>
       </tr>
       <tr>
@@ -431,6 +438,11 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
 // IPCU/IVA%/VALOR TOTAL, sección de totales+impuestos idéntica) ───────────
 function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: VehiculoExterno): string {
   const primera = lineas[0];
+  // Mismo requerimiento que paginaAgropecuaria: mostrar el dato EXACTO de la
+  // factura real de Siesa, con fallback a lo resuelto si aún no hay snapshot.
+  const nombreFactura = (primera.clienteFactura || primera.cliente).toUpperCase();
+  const nitMostrar = primera.nitFactura ?? primera.nit ?? "—";
+  const direccionMostrar = primera.direccionFactura ?? primera.direccion ?? "—";
   const empresa = EMPRESAS.INVERSIONES;
   const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
   const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
@@ -486,21 +498,21 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
     </table>
     <table class="inv-info">
       <tr>
-        <td class="lbl">Señor (es):</td><td>${esc(primera.cliente.toUpperCase())}</td>
+        <td class="lbl">Señor (es):</td><td>${esc(nombreFactura)}</td>
         <td class="lbl">Forma de Pago:</td><td>CONTADO</td>
         <td class="lbl" rowspan="2">Vendedor:</td><td rowspan="2">${esc(primera.vendedor ?? "—")}</td>
       </tr>
       <tr>
-        <td class="lbl">Contacto:</td><td>${esc(primera.cliente.toUpperCase())}</td>
+        <td class="lbl">Contacto:</td><td>${esc(nombreFactura)}</td>
         <td class="lbl">Medio de Pago:</td><td>CONTADO</td>
       </tr>
       <tr>
-        <td class="lbl">Nit o C.C.:</td><td>${esc(primera.nit ?? "—")}</td>
+        <td class="lbl">Nit o C.C.:</td><td>${esc(nitMostrar)}</td>
         <td class="lbl">Fecha Factura:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td>
         <td class="lbl">Fecha de Vcto:</td><td>${esc(vcto)}</td>
       </tr>
       <tr>
-        <td class="lbl">Dirección:</td><td>${esc(primera.direccion ?? "—")}</td>
+        <td class="lbl">Dirección:</td><td>${esc(direccionMostrar)}</td>
         <td class="lbl">Orden de Compra</td><td>${esc(primera.codigo ?? "—")}</td>
         <td class="lbl">Transportador:</td><td>${esc(vehiculo.conductor ?? "—")}</td>
       </tr>

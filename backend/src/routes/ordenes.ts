@@ -1240,6 +1240,12 @@ router.post("/reenviar", requireAuth, requirePermiso("distrilog.nivel_servicio.e
             producto: o.producto,
             cantidadKg: o.cantidadKg,
             estado: "Pendiente",
+            // La factura real que ampara este reenvío no cambió -- conserva
+            // el snapshot exacto de Siesa para que la remisión reimpresa
+            // siga mostrando los mismos datos de la factura original.
+            clienteFactura: o.clienteFactura,
+            nitFactura: o.nitFactura,
+            direccionFactura: o.direccionFactura,
           })),
         }),
         prisma.orden.updateMany({
@@ -1505,6 +1511,12 @@ async function guardarFacturaTat(
     nit: codigo,
     codigo,
     direccion,
+    // Exactamente como viene la factura de Siesa, sin cruzar con el maestro
+    // GS/TAT -- esto (no `cliente`/`nit`/`direccion` de arriba) es lo que
+    // debe imprimirse en la factura/remisión (requerimiento del negocio).
+    clienteFactura: String(f.razon_social_cliente ?? "").trim() || null,
+    nitFactura: nit || null,
+    direccionFactura: dirInv || null,
     clienteSistemaId: clienteTat?.id ?? null,
     // Vendedor real de la factura (Siesa, campo nombre_vendedor); si esa
     // factura puntual no lo trae, cae al maestro TAT local como respaldo.
@@ -1772,6 +1784,7 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
     facturasEncontradas++;
     const nit = String(filas[0].cliente_factura ?? "").trim() || null;
     const direccionSiesa = String(filas[0].direccion_sucursal ?? "").trim() || null;
+    const clienteSiesa = String(filas[0].razon_social_cliente ?? "").trim() || null;
     const cufe = String(filas[0].cufe ?? "").trim().slice(0, 100) || null;
     const qrTexto = String(filas[0].qr_code_url ?? "").trim().slice(0, 2000) || null;
     const firmaDigital = String(filas[0].firma_digital ?? "").trim().slice(0, 4000) || null;
@@ -1812,6 +1825,11 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
           ...(productoCodigo && !o.productoCodigo ? { productoCodigo } : {}),
           ...(nit && !o.nit ? { nit } : {}),
           ...(direccionSiesa && !o.direccion ? { direccion: direccionSiesa } : {}),
+          // Snapshot EXACTO de la factura real (no "si está vacío" como arriba
+          // -- esto siempre debe reflejar lo último que dijo Siesa).
+          clienteFactura: clienteSiesa,
+          nitFactura: nit,
+          direccionFactura: direccionSiesa,
         },
       });
       ordenesActualizadas++;
