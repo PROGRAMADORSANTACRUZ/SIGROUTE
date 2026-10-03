@@ -458,40 +458,64 @@ router.post(
       let actualizados = 0;
       let sinCambios = 0;
 
-      await prisma.$transaction(async (tx) => {
-        for (const [k, f] of porClave) {
-          const actual = existentePorClave.get(k);
-          if (!actual) {
-            // Nuevo cliente: se crea con lo que traiga el archivo.
-            const data: Record<string, string | null> = {};
-            for (const { key } of CAMPOS) data[key] = f[key] || null;
-            for (const key of CAMPOS_EXTRA) data[key] = f[key] || null;
-            data.extraDrivin = f.extraDrivin || null;
-            await tx.cliente.create({ data: { ...data, consecutivos: JSON.stringify([]) } });
-            creados++;
-            continue;
-          }
-          // Existente: compara SOLO las columnas que sí vinieron en este Excel;
-          // las que el archivo no trae (p. ej. si es un export parcial) no se tocan.
-          let difiereContenido = false;
+      // Antes: un solo prisma.$transaction interactivo con un create/update
+      // POR FILA, uno por uno de forma secuencial -- con archivos grandes
+      // (cientos/miles de clientes) esto supera el timeout por defecto de 5s
+      // de las transacciones interactivas de Prisma (P2028, "Transaction
+      // already closed") y, mientras corre, acapara el pool de conexiones
+      // haciendo fallar OTRAS peticiones concurrentes con "Timed out
+      // fetching a new connection" (P2024) -- visto en logs reales de
+      // producción 2026-10-03. El import es un upsert idempotente (no
+      // necesita atomicidad todo-o-nada: si falla a mitad de camino,
+      // reimportar el mismo archivo corrige lo que falte), así que se
+      // reemplaza la transacción por lotes paralelos sin transacción
+      // (mismo patrón ya usado en Programación/guardar).
+      type Operacion =
+        | { tipo: "crear"; data: Record<string, string | null> }
+        | { tipo: "actualizar"; id: string; data: Record<string, string | null> };
+      const operaciones: Operacion[] = [];
+      for (const [k, f] of porClave) {
+        const actual = existentePorClave.get(k);
+        if (!actual) {
+          // Nuevo cliente: se crea con lo que traiga el archivo.
           const data: Record<string, string | null> = {};
-          for (const key of CAMPOS_CONTENIDO) {
-            if (!presentes.has(key)) continue;
-            const nuevo = (f as unknown as Record<string, string | undefined>)[key] ?? "";
-            const previo = (actual as unknown as Record<string, string | null>)[key];
-            if (comparable(previo) !== comparable(nuevo)) difiereContenido = true;
-            data[key] = nuevo || null;
-          }
-          if (!difiereContenido) { sinCambios++; continue; }
-          // El contenido cambió de verdad: limpia lat/lon para marcar "sin
-          // verificar" en el mapa (igual que Sigcompro), salvo que el propio
-          // archivo ya traiga coordenadas (p. ej. reimportar nuestro export).
-          data.lat = presentes.has("lat") ? (f.lat || null) : null;
-          data.lon = presentes.has("lon") ? (f.lon || null) : null;
-          await tx.cliente.update({ where: { id: actual.id }, data });
-          actualizados++;
+          for (const { key } of CAMPOS) data[key] = f[key] || null;
+          for (const key of CAMPOS_EXTRA) data[key] = f[key] || null;
+          data.extraDrivin = f.extraDrivin || null;
+          operaciones.push({ tipo: "crear", data });
+          continue;
         }
-      });
+        // Existente: compara SOLO las columnas que sí vinieron en este Excel;
+        // las que el archivo no trae (p. ej. si es un export parcial) no se tocan.
+        let difiereContenido = false;
+        const data: Record<string, string | null> = {};
+        for (const key of CAMPOS_CONTENIDO) {
+          if (!presentes.has(key)) continue;
+          const nuevo = (f as unknown as Record<string, string | undefined>)[key] ?? "";
+          const previo = (actual as unknown as Record<string, string | null>)[key];
+          if (comparable(previo) !== comparable(nuevo)) difiereContenido = true;
+          data[key] = nuevo || null;
+        }
+        if (!difiereContenido) { sinCambios++; continue; }
+        // El contenido cambió de verdad: limpia lat/lon para marcar "sin
+        // verificar" en el mapa (igual que Sigcompro), salvo que el propio
+        // archivo ya traiga coordenadas (p. ej. reimportar nuestro export).
+        data.lat = presentes.has("lat") ? (f.lat || null) : null;
+        data.lon = presentes.has("lon") ? (f.lon || null) : null;
+        operaciones.push({ tipo: "actualizar", id: actual.id, data });
+      }
+
+      const TAMANO_LOTE = 25;
+      for (let i = 0; i < operaciones.length; i += TAMANO_LOTE) {
+        const lote = operaciones.slice(i, i + TAMANO_LOTE);
+        await Promise.all(
+          lote.map((op) =>
+            op.tipo === "crear"
+              ? prisma.cliente.create({ data: { ...op.data, consecutivos: JSON.stringify([]) } }).then(() => { creados++; })
+              : prisma.cliente.update({ where: { id: op.id }, data: op.data }).then(() => { actualizados++; })
+          )
+        );
+      }
 
       res.status(201).json({
         totalFilas: porClave.size,
