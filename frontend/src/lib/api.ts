@@ -301,6 +301,14 @@ export interface Orden {
   pedidoSigcom?: string | null;
   ordenCompra?: string | null;
   fechaAprobacionDian?: string | null;
+  // Usuario real que elaboró/aprobó la factura en Siesa (uno por documento,
+  // NO un nombre fijo) + descuento real de la línea + documento base
+  // referenciado (si la factura referencia otra), todos reales de Siesa.
+  elaboradoPor?: string | null;
+  aprobadoPor?: string | null;
+  descuentoValor?: number | null;
+  descuentoPorcentaje?: number | null;
+  documentoBase?: string | null;
   // Ciudad real del cliente (maestro TAT); Orden.destino en TAT es una clave
   // de agrupacion/asignacion (a veces el mismo codigo del cliente), NO una
   // ciudad -- usar este campo para mostrar ciudad en documentos impresos.

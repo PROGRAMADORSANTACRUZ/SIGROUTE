@@ -843,6 +843,14 @@ model Orden {
   pedidoSigcom        String?
   ordenCompra         String?
   fechaAprobacionDian String?
+  // Usuario real que elaboró/aprobó la factura en Siesa (uno por documento,
+  // NO un nombre fijo del sistema) + descuento real de la línea + documento
+  // base referenciado, cuando lo hay -- todos expuestos por Siesa 2026-10-03.
+  elaboradoPor        String?
+  aprobadoPor         String?
+  descuentoValor      Float?
+  descuentoPorcentaje Float?
+  documentoBase       String?
 
   // CUFE + texto íntegro del QR de la factura electrónica DIAN, capturados al
   // escanear la factura física (flujo TAT/Inversiones); null en órdenes
@@ -851,11 +859,9 @@ model Orden {
   // URL de validación), así que esa sigue sin poder reproducirse.
   cufe         String?
   qrTexto      String? @db.Text
-  // Firma digital electrónica completa de la factura (texto/base64), pendiente
-  // de que se habilite el endpoint de Siesa que la expone — verificado en vivo
-  // 2026-09-24 que "ventas/facturas-agropecuaria-tat"/"facturas-tat-inversiones"
-  // NO la traen (solo cliente/producto/valor/kg). Campo listo, queda null hasta
-  // que ese endpoint exista.
+  // Firma digital electrónica completa de la factura (texto/base64) -- Siesa
+  // SÍ la expone (confirmado en vivo 2026-09-24 vía
+  // "facturas-agropecuaria-tat"/"facturas-tat-inversiones").
   firmaDigital String? @db.Text
 
   podCode       String?
@@ -1173,6 +1179,11 @@ model OrdenHistorico {
   pedidoSigcom        String?
   ordenCompra         String?
   fechaAprobacionDian String?
+  elaboradoPor        String?
+  aprobadoPor         String?
+  descuentoValor      Float?
+  descuentoPorcentaje Float?
+  documentoBase       String?
   distribucion     String
   tatOrigen        String?
   cufe             String?

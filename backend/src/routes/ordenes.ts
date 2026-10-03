@@ -1249,6 +1249,11 @@ router.post("/reenviar", requireAuth, requirePermiso("distrilog.nivel_servicio.e
             pedidoSigcom: o.pedidoSigcom,
             ordenCompra: o.ordenCompra,
             fechaAprobacionDian: o.fechaAprobacionDian,
+            elaboradoPor: o.elaboradoPor,
+            aprobadoPor: o.aprobadoPor,
+            descuentoValor: o.descuentoValor,
+            descuentoPorcentaje: o.descuentoPorcentaje,
+            documentoBase: o.documentoBase,
           })),
         }),
         prisma.orden.updateMany({
@@ -1526,6 +1531,13 @@ async function guardarFacturaTat(
     pedidoSigcom: String(f.npedido_sigcom ?? "").trim() || null,
     ordenCompra: String(f.num_docto_referencia_pedido ?? "").trim() || null,
     fechaAprobacionDian: String(f.fecha_aprobacion_dian ?? "").trim() || null,
+    // Usuario real que elaboró/aprobó esta factura en Siesa (uno por
+    // documento) + descuento real de esta línea + documento base referenciado.
+    elaboradoPor: String(f.elaborado_por ?? "").trim() || null,
+    aprobadoPor: String(f.aprobado_por ?? "").trim() || null,
+    descuentoValor: Number(f.descuento_valor) || 0,
+    descuentoPorcentaje: Number(f.descuento_porcentaje) || 0,
+    documentoBase: String(f.documento_base ?? "").trim() || null,
     clienteSistemaId: clienteTat?.id ?? null,
     // Vendedor real de la factura (Siesa, campo nombre_vendedor); si esa
     // factura puntual no lo trae, cae al maestro TAT local como respaldo.
@@ -1800,6 +1812,8 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
     const pedidoSigcom = String(filas[0].npedido_sigcom ?? "").trim() || null;
     const ordenCompra = String(filas[0].num_docto_referencia_pedido ?? "").trim() || null;
     const fechaAprobacionDian = String(filas[0].fecha_aprobacion_dian ?? "").trim() || null;
+    const elaboradoPor = String(filas[0].elaborado_por ?? "").trim() || null;
+    const aprobadoPor = String(filas[0].aprobado_por ?? "").trim() || null;
     const totalValorFactura = filas.reduce((s, f) => s + (Number(f.valor_subtotal) || 0), 0);
     const totalKgLocal = locales.reduce((s, o) => s + o.cantidadKg, 0);
 
@@ -1826,6 +1840,9 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
       }
       const filaElegida = mejorIdx >= 0 ? filasDisponibles.splice(mejorIdx, 1)[0] : null;
       const productoCodigo = filaElegida ? codigoProductoTat(String(filaElegida.tipo_comercial ?? "")) : null;
+      const descuentoValor = Number(filaElegida?.descuento_valor) || 0;
+      const descuentoPorcentaje = Number(filaElegida?.descuento_porcentaje) || 0;
+      const documentoBase = String(filaElegida?.documento_base ?? "").trim() || null;
 
       await prisma.orden.update({
         where: { id: o.id },
@@ -1845,6 +1862,11 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
           pedidoSigcom,
           ordenCompra,
           fechaAprobacionDian,
+          elaboradoPor,
+          aprobadoPor,
+          descuentoValor,
+          descuentoPorcentaje,
+          documentoBase,
         },
       });
       ordenesActualizadas++;

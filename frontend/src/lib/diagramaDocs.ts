@@ -14,6 +14,9 @@ const baseHref = (): string =>
 const fmtKg = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const fmtMoney = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtInt = (n: number) => Math.round(n).toLocaleString("en-US");
+// Porcentaje tal como lo imprime Siesa: sin decimales si es entero (ej. "8 %"),
+// con hasta 2 si no (ej. "3.33 %").
+const fmtPct = (n: number) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2));
 
 function esc(s: unknown): string {
   return String(s ?? "")
@@ -309,7 +312,8 @@ const CSS_FACTURA = `
   .chico { font-size: 9.5px; color: #333; }
   .letras { margin: 5px 0; font-size: 10px; }
   .pie-firmas { margin-top: 14px; }
-  .pie-firmas td { border: none; text-align: center; font-size: 9.5px; padding-top: 14px; }
+  .pie-firmas td { border: none; text-align: center; font-size: 9.5px; }
+  .pie-firmas tr:first-child td { padding-top: 14px; font-weight: bold; min-height: 12px; }
   .pie-firmas .linea { border-top: 1px solid #000; padding-top: 3px; }
   .cufe-box { margin-top: 6px; font-size: 9px; word-break: break-all; }
   .footer-nota { margin-top: 10px; font-size: 8.5px; color: #333; line-height: 1.4; }
@@ -341,19 +345,30 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
   const filas = lineas.map((l) => {
     const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
     const descripcion = l.producto.replace(/^\d{2,}\s*[-–]?\s*/, "");
-    const precioUnit = l.cantidadKg > 0 ? l.valor / l.cantidadKg : 0;
+    // Orden.valor es el SUBTOTAL ya neto (post-descuento) que manda Siesa --
+    // para mostrar COSTO UND/COSTO TOTAL brutos (como en la factura real) se
+    // le vuelve a sumar el descuento real de esta línea. Verificado exacto
+    // contra la factura real FEP65016 (65.20kg, bruto $795,440 = neto
+    // $731,804.80 + descuento $63,635.20).
+    const descValor = l.descuentoValor ?? 0;
+    const descPct = l.descuentoPorcentaje ?? 0;
+    const bruto = l.valor + descValor;
+    const precioUnit = l.cantidadKg > 0 ? bruto / l.cantidadKg : 0;
     return `<tr>
       <td>${esc(referencia)}</td>
       <td>${esc(descripcion)}</td>
       <td style="text-align:center">KG</td>
       <td style="text-align:right">${fmtMoney(l.cantidadKg)}</td>
       <td style="text-align:right">$${fmtMoney(precioUnit)}</td>
-      <td style="text-align:right">$0.00</td>
+      <td style="text-align:right">$${fmtMoney(descValor)}</td>
+      <td style="text-align:center">${fmtPct(descPct)} %</td>
       <td style="text-align:center">0 %</td>
-      <td style="text-align:center">0 %</td>
-      <td style="text-align:right">$${fmtMoney(l.valor)}</td>
+      <td style="text-align:right">$${fmtMoney(bruto)}</td>
     </tr>`;
   }).join("");
+
+  const totalBruto = lineas.reduce((s, l) => s + l.valor + (l.descuentoValor ?? 0), 0);
+  const totalDescuento = lineas.reduce((s, l) => s + (l.descuentoValor ?? 0), 0);
 
   return `<div class="page">
     <table class="agro-header">
@@ -377,6 +392,7 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
             <tr><td class="lbl">Fecha de vencimiento:</td><td>${esc(vcto)}</td></tr>
             <tr><td class="lbl">Pedido :</td><td>${esc(pedidoMostrar)}</td></tr>
             <tr><td class="lbl">O.C:</td><td>${esc(ocMostrar)}</td></tr>
+            <tr><td class="lbl">Documento Base:</td><td>${esc(primera.documentoBase ?? "—")}</td></tr>
           </table>
           ${primera.qrTexto ? `<div style="margin-top:4px">${qrSvg(primera.qrTexto)}</div>` : ""}
         </td>
@@ -415,8 +431,8 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
       <tbody><tr><td>IVA</td><td></td><td style="text-align:right">$${fmtMoney(totalValor)}</td><td style="text-align:center">0 %</td><td style="text-align:right">$0.00</td></tr></tbody>
     </table>
     <table class="agro-totales">
-      <tr><td class="lbl">VALOR BRUTO</td><td>$${fmtMoney(totalValor)}</td></tr>
-      <tr><td class="lbl">DESCUENTO</td><td>$0.00</td></tr>
+      <tr><td class="lbl">VALOR BRUTO</td><td>$${fmtMoney(totalBruto)}</td></tr>
+      <tr><td class="lbl">DESCUENTO</td><td>$${fmtMoney(totalDescuento)}</td></tr>
       <tr><td class="lbl">SUBTOTAL</td><td>$${fmtMoney(totalValor)}</td></tr>
       <tr><td class="lbl">IVA</td><td>$0.00</td></tr>
       <tr><td class="lbl">RETENCIONES</td><td>$0.00</td></tr>
@@ -425,6 +441,11 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
     <p class="chico">Notas: PEDIDO ${esc(pedidoMostrar)}</p>
     <p class="letras"><b>VALOR EN LETRAS:</b> ${esc(valorEnLetras(totalValor))} *******</p>
     <table class="pie-firmas">
+      <tr>
+        <td>${esc(primera.elaboradoPor ?? "")}</td>
+        <td></td>
+        <td>${esc(primera.aprobadoPor ?? "")}</td>
+      </tr>
       <tr>
         <td class="linea">Elaborado Por:</td>
         <td class="linea">Recibo de la Factura</td>
@@ -461,13 +482,30 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
   const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
   const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
   const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
-  const iva = Math.round(totalValor * 0.05 * 100) / 100; // 5% IVA, misma tasa vista en la factura real
-  const subtotal = totalValor + iva;
+  const IVA_RATE = 0.05; // misma tasa vista en la factura real
 
-  const filas = lineas.map((l, i) => {
+  // Orden.valor (valor_subtotal de Siesa) ya incluye IVA y el descuento
+  // aplicado -- verificado exacto contra la factura real FESI25347 sin
+  // descuento (3 x $5,341.00 x 1.05 = $16,824.15). Para mostrar PRECIO UNIT
+  // y DSCTO como en el original se deshace el IVA y se suma de vuelta el
+  // descuento real de la línea (Orden.descuentoValor/.descuentoPorcentaje).
+  const filasCalc = lineas.map((l) => {
+    const descPct = l.descuentoPorcentaje ?? 0;
+    const descValor = l.descuentoValor ?? 0;
+    const baseConDescuento = l.valor / (1 + IVA_RATE);
+    const bruto = baseConDescuento + descValor;
+    const precioUnit = l.cantidadKg > 0 ? bruto / l.cantidadKg : 0;
+    return { l, descPct, descValor, bruto, precioUnit };
+  });
+  const totalBruto = filasCalc.reduce((s, f) => s + f.bruto, 0);
+  const totalDescuento = filasCalc.reduce((s, f) => s + f.descValor, 0);
+  const baseGravable = totalBruto - totalDescuento;
+  const iva = Math.round(baseGravable * IVA_RATE * 100) / 100;
+  const subtotal = baseGravable + iva;
+
+  const filas = filasCalc.map(({ l, descPct, precioUnit }, i) => {
     const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
     const descripcion = l.producto.replace(/^\d{2,}\s*[-–]?\s*/, "");
-    const precioUnit = l.cantidadKg > 0 ? l.valor / l.cantidadKg : 0;
     return `<tr>
       <td style="text-align:center">${i + 1}</td>
       <td>${esc(referencia)}</td>
@@ -476,7 +514,7 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
       <td style="text-align:right">${fmtMoney(l.cantidadKg)}</td>
       <td style="text-align:center">KG</td>
       <td style="text-align:right">$${fmtMoney(precioUnit)}</td>
-      <td style="text-align:right">0.00 %</td>
+      <td style="text-align:right">${fmtPct(descPct)} %</td>
       <td style="text-align:right">0.00 %</td>
       <td style="text-align:center">5 %</td>
       <td style="text-align:right">$${fmtMoney(l.valor)}</td>
@@ -550,8 +588,8 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
     </table>
     <table class="inv-totales">
       <tr><td class="lbl">Total Cantidad</td><td>${fmtInt(totalKg)}</td>
-        <td class="lbl">TOTAL BRUTO</td><td>$${fmtMoney(totalValor)}</td>
-        <td class="lbl">DSCTO X LINEA</td><td>$0.00</td></tr>
+        <td class="lbl">TOTAL BRUTO</td><td>$${fmtMoney(totalBruto)}</td>
+        <td class="lbl">DSCTO X LINEA</td><td>$${fmtMoney(totalDescuento)}</td></tr>
       <tr><td class="lbl">IMPUESTOS</td><td>$${fmtMoney(iva)}</td>
         <td class="lbl">SUB-TOTAL</td><td>$${fmtMoney(subtotal)}</td>
         <td class="lbl">RETENCIONES</td><td>$0.00</td></tr>
@@ -559,7 +597,7 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
     </table>
     <table class="inv-impuestos">
       <thead><tr><th></th><th>DESCRIPCIÓN IMPUESTO</th><th>BASE</th><th>TASA</th><th>TOTAL IMPUESTO</th></tr></thead>
-      <tbody><tr><td>IVA</td><td></td><td style="text-align:right">$${fmtMoney(totalValor)}</td><td style="text-align:center">5 %</td><td style="text-align:right">$${fmtMoney(iva)}</td></tr></tbody>
+      <tbody><tr><td>IVA</td><td></td><td style="text-align:right">$${fmtMoney(baseGravable)}</td><td style="text-align:center">5 %</td><td style="text-align:right">$${fmtMoney(iva)}</td></tr></tbody>
     </table>
     <p class="letras"><b>Valor Letras:</b> ${esc(valorEnLetras(subtotal))} *******</p>
     <p class="chico">OBSERVACIONES: —</p>

@@ -26,6 +26,18 @@ export interface TatInvoiceRaw {
   npedido_sigcom?: string | null;
   num_docto_referencia_pedido?: string | null;
   pedido_notas?: string | null;
+  // Usuario que elaboró/aprobó la factura en Siesa (t350.f350_usuario_creacion
+  // / f350_usuario_aprobacion) — reales por documento, NO un nombre fijo del
+  // sistema (confirmado por el usuario 2026-10-03: cada factura trae el suyo).
+  elaborado_por?: string | null;
+  aprobado_por?: string | null;
+  // Descuento real de la línea (t461.f461_vlr_dscto + f461_vlr_dscto_global).
+  descuento_valor?: number | null;
+  descuento_porcentaje?: number | null;
+  // Documento base referenciado (t461.f461_rowid_docto_factura_base, ya
+  // resuelto a su número de documento, ej. "FE-00012345") — null si la
+  // factura no referencia otra.
+  documento_base?: string | null;
   cufe?: string | null;
   qr_code_url?: string | null;
   firma_digital?: string | null;
