@@ -1246,6 +1246,9 @@ router.post("/reenviar", requireAuth, requirePermiso("distrilog.nivel_servicio.e
             clienteFactura: o.clienteFactura,
             nitFactura: o.nitFactura,
             direccionFactura: o.direccionFactura,
+            pedidoSigcom: o.pedidoSigcom,
+            ordenCompra: o.ordenCompra,
+            fechaAprobacionDian: o.fechaAprobacionDian,
           })),
         }),
         prisma.orden.updateMany({
@@ -1517,6 +1520,12 @@ async function guardarFacturaTat(
     clienteFactura: String(f.razon_social_cliente ?? "").trim() || null,
     nitFactura: nit || null,
     direccionFactura: dirInv || null,
+    // Pedido/orden de compra reales de Siesa (no el `codigo` NIT-sucursal
+    // interno, que antes se mostraba por error como "Pedido" en la factura
+    // impresa) + hora de aprobación DIAN, para las plantillas de factura.
+    pedidoSigcom: String(f.npedido_sigcom ?? "").trim() || null,
+    ordenCompra: String(f.num_docto_referencia_pedido ?? "").trim() || null,
+    fechaAprobacionDian: String(f.fecha_aprobacion_dian ?? "").trim() || null,
     clienteSistemaId: clienteTat?.id ?? null,
     // Vendedor real de la factura (Siesa, campo nombre_vendedor); si esa
     // factura puntual no lo trae, cae al maestro TAT local como respaldo.
@@ -1788,6 +1797,9 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
     const cufe = String(filas[0].cufe ?? "").trim().slice(0, 100) || null;
     const qrTexto = String(filas[0].qr_code_url ?? "").trim().slice(0, 2000) || null;
     const firmaDigital = String(filas[0].firma_digital ?? "").trim().slice(0, 4000) || null;
+    const pedidoSigcom = String(filas[0].npedido_sigcom ?? "").trim() || null;
+    const ordenCompra = String(filas[0].num_docto_referencia_pedido ?? "").trim() || null;
+    const fechaAprobacionDian = String(filas[0].fecha_aprobacion_dian ?? "").trim() || null;
     const totalValorFactura = filas.reduce((s, f) => s + (Number(f.valor_subtotal) || 0), 0);
     const totalKgLocal = locales.reduce((s, o) => s + o.cantidadKg, 0);
 
@@ -1830,6 +1842,9 @@ export async function sincronizarAgropecuaria(fecha: string, fechaFin: string) {
           clienteFactura: clienteSiesa,
           nitFactura: nit,
           direccionFactura: direccionSiesa,
+          pedidoSigcom,
+          ordenCompra,
+          fechaAprobacionDian,
         },
       });
       ordenesActualizadas++;

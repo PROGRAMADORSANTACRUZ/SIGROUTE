@@ -834,6 +834,16 @@ model Orden {
   distribucion String  @default("AGROPECUARIA")
   tatOrigen    String?
 
+  // Numeros reales de pedido/orden de compra que Siesa YA expone (TatInvoiceRaw
+  // .npedido_sigcom / .num_docto_referencia_pedido) pero que antes no se
+  // guardaban -- la factura impresa mostraba el NIT-sucursal interno (campo
+  // `codigo`) como si fuera el "Pedido", que es incorrecto/confuso. Tambien
+  // la hora de aprobacion DIAN (`fecha_aprobacion_dian`), que la plantilla
+  // Inversiones necesita para "Fecha Validacion Dian".
+  pedidoSigcom        String?
+  ordenCompra         String?
+  fechaAprobacionDian String?
+
   // CUFE + texto íntegro del QR de la factura electrónica DIAN, capturados al
   // escanear la factura física (flujo TAT/Inversiones); null en órdenes
   // cargadas por Excel (Bovino/Porcino), que nunca pasan por el escáner.
@@ -1160,6 +1170,9 @@ model OrdenHistorico {
   clienteFactura   String?
   nitFactura       String?
   direccionFactura String?
+  pedidoSigcom        String?
+  ordenCompra         String?
+  fechaAprobacionDian String?
   distribucion     String
   tatOrigen        String?
   cufe             String?

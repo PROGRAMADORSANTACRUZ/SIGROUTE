@@ -28,8 +28,11 @@ function fechaHoy(): string {
 
 // Datos fijos de encabezado por razón social (verificados contra facturas
 // reales Siesa: FEP65016 para Agropecuaria, FESI25347 para Inversiones).
-const EMPRESAS: Record<string, { nombre: string; nit: string; direccion: string; telefono: string; ciudad: string; email: string; logo: string }> = {
-  INVERSIONES: { nombre: "INVERSIONES SERRANO MILLAN S.A.S", nit: "900391505-9", direccion: "CALLE 4 #2-21", telefono: "3106115649", ciudad: "Malambo", email: "COMERCIAL@CFSANTACRUZ.COM", logo: "/logos/inversiones-serrano-millan.png" },
+// `qrPago` es el QR estático de pagos/transferencias de Inversiones (NO es el
+// QR de la factura electrónica/CUFE, es un QR fijo de la empresa) — archivo
+// pendiente de agregar en frontend/public/logos/ (ver aviso en el commit).
+const EMPRESAS: Record<string, { nombre: string; nit: string; direccion: string; telefono: string; ciudad: string; email: string; logo: string; qrPago?: string }> = {
+  INVERSIONES: { nombre: "INVERSIONES SERRANO MILLAN S.A.S", nit: "900391505-9", direccion: "CALLE 4 #2-21", telefono: "3106115649", ciudad: "Malambo", email: "COMERCIAL@CFSANTACRUZ.COM", logo: "/logos/inversiones-serrano-millan.png", qrPago: "/logos/inversiones-pago-qr.png" },
   AGROPECUARIA: { nombre: "AGROPECUARIA SANTACRUZ LIMITADA", nit: "830505537", direccion: "CLL 4 2 21", telefono: "", ciudad: "Malambo", email: "", logo: "/logos/agropecuaria-santacruz.png" },
 };
 
@@ -315,14 +318,13 @@ const CSS_FACTURA = `
 
 // ── Plantilla exacta AGROPECUARIA SANTACRUZ LIMITADA (calcada de la factura
 // real FEP65016: logo circular verde, encabezado sin bordes, tabla
-// CODIGO/DESCRIPCION/UM/CANT/COSTO UND/Descuento/%Dcto/IVA/COSTO TOTAL) ─────
+// CODIGO/DESCRIPCION/UM/CANT/COSTO UND/Descuentto/%Dcto/IVA/COSTO TOTAL) ─────
 function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: VehiculoExterno): string {
   const primera = lineas[0];
   const empresa = EMPRESAS.AGROPECUARIA;
   const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
   const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
   const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
-  const verificada = Boolean(primera.cufe && primera.qrTexto);
   // Requerimiento del negocio: la factura/remisión SIEMPRE debe mostrar el
   // dato EXACTO de la factura real de Siesa, no el nombre/nit/dirección ya
   // cruzados con el maestro GS/TAT -- cae a los campos resueltos solo si aún
@@ -330,6 +332,11 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
   const nombreFactura = (primera.clienteFactura || primera.cliente).toUpperCase();
   const nitMostrar = primera.nitFactura ?? primera.nit ?? "—";
   const direccionMostrar = primera.direccionFactura ?? primera.direccion ?? "—";
+  // Pedido/O.C reales de Siesa (ver Orden.pedidoSigcom/.ordenCompra) — antes
+  // se mostraba acá el `codigo` interno (clave NIT-sucursal), que NO es un
+  // número de pedido real; se deja como respaldo solo si aún no hay el dato real.
+  const pedidoMostrar = primera.pedidoSigcom ?? primera.codigo ?? "—";
+  const ocMostrar = primera.ordenCompra ?? "—";
 
   const filas = lineas.map((l) => {
     const referencia = l.productoCodigo ?? (/^(\d{2,})\s*[-–]?\s*/.exec(l.producto.trim())?.[1] ?? "—");
@@ -351,25 +358,27 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
   return `<div class="page">
     <table class="agro-header">
       <tr>
-        <td style="border:none;width:58%;vertical-align:top">
+        <td style="border:none;width:20%;vertical-align:top">
           <img src="${empresa.logo}" class="agro-logo" alt=""/>
+        </td>
+        <td style="border:none;width:45%;text-align:center;vertical-align:top">
           <div class="agro-empresa">${esc(empresa.nombre)}</div>
           <div class="chico">${esc(empresa.direccion)}${empresa.ciudad ? " " + esc(empresa.ciudad) : ""}</div>
           <div class="chico">NIT: ${esc(empresa.nit)}</div>
           <div class="chico">Tel: ${esc(empresa.telefono)}</div>
-          <div class="chico" style="margin-top:4px">Autorización Numeración de Facturación — Responsables del impuesto sobre las ventas IVA</div>
+          <div class="chico" style="margin-top:4px">Autorización Numeración de Facturación No. 18764103034324 Numeración: AUTORIZADA Rango desde: FEP1 hasta: FEP1000000 Vigencia desde: 2025/12/13 hasta: 12/13/2027 - 24 Meses</div>
+          <div class="chico" style="margin-top:2px">Responsables del impuesto sobre las ventas IVA</div>
         </td>
-        <td style="border:none;width:42%;text-align:right;vertical-align:top">
-          ${verificada
-            ? `<div>${qrSvg(primera.qrTexto!)}</div>`
-            : `<div class="chico" style="color:#a33">Sin CUFE/QR — no hay factura Siesa asociada</div>`}
+        <td style="border:none;width:35%;text-align:right;vertical-align:top">
           <div class="agro-titulo">FACTURA ELECTRONICA<br/>DE VENTA</div>
           <table class="agro-campos">
             <tr><td class="lbl">Factura de Venta:</td><td>${esc(numeroOrden)}</td></tr>
             <tr><td class="lbl">Fecha de emisión:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td></tr>
             <tr><td class="lbl">Fecha de vencimiento:</td><td>${esc(vcto)}</td></tr>
-            <tr><td class="lbl">Pedido:</td><td>${esc(primera.codigo ?? "—")}</td></tr>
+            <tr><td class="lbl">Pedido :</td><td>${esc(pedidoMostrar)}</td></tr>
+            <tr><td class="lbl">O.C:</td><td>${esc(ocMostrar)}</td></tr>
           </table>
+          ${primera.qrTexto ? `<div style="margin-top:4px">${qrSvg(primera.qrTexto)}</div>` : ""}
         </td>
       </tr>
     </table>
@@ -377,30 +386,33 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
       <tr><td class="lbl">NOMBRE CLIENTE:</td><td colspan="3"><b>${esc(nombreFactura)}</b></td></tr>
       <tr>
         <td class="lbl">NIT:</td><td>${esc(nitMostrar)}</td>
-        <td class="lbl">FORMA DE PAGO:</td><td>CONTADO</td>
+        <td class="lbl">ESTABLECIMIENTO :</td><td>${esc(nombreFactura)}</td>
       </tr>
       <tr>
         <td class="lbl">DIRECCION:</td><td>${esc(direccionMostrar)}</td>
-        <td class="lbl">MEDIO DE PAGO:</td><td>CONTADO</td>
+        <td class="lbl">FORMA DE PAGO:</td><td>CONTADO</td>
       </tr>
       <tr>
         <td class="lbl">CIUDAD:</td><td>${esc(primera.ciudad || "—")}</td>
-        <td class="lbl">VENDEDOR:</td><td>${esc(primera.vendedor ?? "—")}</td>
+        <td class="lbl">MEDIO DE PAGO:</td><td></td>
       </tr>
       <tr>
         <td class="lbl">TELEFONO:</td><td>—</td>
-        <td class="lbl">TRANSPORTADOR:</td><td>${esc(vehiculo.conductor ?? "—")} · ${esc(vehiculo.placa)}</td>
+        <td class="lbl">VENDEDOR:</td><td>${esc(primera.vendedor ?? "—")}</td>
       </tr>
       <tr>
-        <td class="lbl">CORREO:</td><td>—</td>
-        <td class="lbl">No. REMISIÓN:</td><td>${esc(numeroOrden)}</td>
+        <td class="lbl">CORREO:</td><td colspan="3">—</td>
       </tr>
     </table>
     <table class="agro-tabla">
       <thead>
-        <tr><th>CODIGO</th><th>DESCRIPCION</th><th style="width:32px">UM</th><th style="width:60px">CANT</th><th style="width:70px">COSTO UND</th><th style="width:70px">Descuento</th><th style="width:44px">% Dcto</th><th style="width:44px">IVA</th><th style="width:85px">COSTO TOTAL</th></tr>
+        <tr><th>CODIGO</th><th>DESCRIPCION</th><th style="width:32px">UM</th><th style="width:60px">CANT</th><th style="width:70px">COSTO UND</th><th style="width:70px">Descuentto</th><th style="width:44px">% Dcto</th><th style="width:44px">IVA</th><th style="width:85px">COSTO TOTAL</th></tr>
       </thead>
       <tbody>${filas}</tbody>
+    </table>
+    <table class="agro-impuestos">
+      <thead><tr><th>IMPUESTOS</th><th>DESCRIPCIÓN IMPUESTO</th><th>BASE</th><th>TASA</th><th>TOTAL IMPUESTO</th></tr></thead>
+      <tbody><tr><td>IVA</td><td></td><td style="text-align:right">$${fmtMoney(totalValor)}</td><td style="text-align:center">0 %</td><td style="text-align:right">$0.00</td></tr></tbody>
     </table>
     <table class="agro-totales">
       <tr><td class="lbl">VALOR BRUTO</td><td>$${fmtMoney(totalValor)}</td></tr>
@@ -410,7 +422,7 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
       <tr><td class="lbl">RETENCIONES</td><td>$0.00</td></tr>
       <tr><td class="lbl">TOTAL A PAGAR</td><td><b>$${fmtMoney(totalValor)}</b></td></tr>
     </table>
-    <p class="chico">Notas: PEDIDO ${esc(primera.codigo ?? numeroOrden)}</p>
+    <p class="chico">Notas: PEDIDO ${esc(pedidoMostrar)}</p>
     <p class="letras"><b>VALOR EN LETRAS:</b> ${esc(valorEnLetras(totalValor))} *******</p>
     <table class="pie-firmas">
       <tr>
@@ -419,8 +431,8 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
         <td class="linea">Aprobado Por:</td>
       </tr>
     </table>
-    <div class="cufe-box"><b>CUFE:</b> ${verificada ? esc(primera.cufe) : "No disponible en esta remisión"}</div>
-    <div class="cufe-box"><b>FIRMA DIGITAL:</b> ${primera.firmaDigital ? esc(primera.firmaDigital) : "no disponible en esta remisión"}</div>
+    <div class="cufe-box"><b>CUFE:</b> ${esc(primera.cufe ?? "—")}</div>
+    <div class="cufe-box"><b>FIRMA DIGITAL:</b> ${esc(primera.firmaDigital ?? "—")}</div>
     <div class="footer-nota">
       Su opinión es importante para nosotros.<br/>
       Para peticiones, quejas, reclamos o felicitaciones, comuníquese con la Línea de Atención al Cliente al 316 435 4391 o con el Call Center a los números 323 619 5727 – 300 341 8833. Estamos para servirle!<br/><br/>
@@ -428,7 +440,6 @@ function paginaAgropecuaria(numeroOrden: string, lineas: Orden[], vehiculo: Vehi
     </div>
     <div class="footer-marca">TRANSFORMAMOS VIDA</div>
     <div class="footer-nota" style="text-align:center">Factura generada por software SIESA de SISTEMAS DE INFORMACION EMPRESARIAL SAS. Nit 890.319.193-3. Siesa e-Invoicing Nit 890.319.193-3.</div>
-    <p class="nota" style="font-size:8px;color:#888;margin-top:8px">Documento de despacho interno generado por SigRoute a partir de la remisión ${esc(numeroOrden)}${verificada ? " (CUFE, QR y firma digital verificados directo con Siesa)" : ""} — no reemplaza la factura electrónica oficial certificada por Siesa/DIAN.</p>
   </div>`;
 }
 
@@ -443,11 +454,13 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
   const nombreFactura = (primera.clienteFactura || primera.cliente).toUpperCase();
   const nitMostrar = primera.nitFactura ?? primera.nit ?? "—";
   const direccionMostrar = primera.direccionFactura ?? primera.direccion ?? "—";
+  // Pedido/O.C reales de Siesa -- ver nota de paginaAgropecuaria.
+  const pedidoMostrar = primera.pedidoSigcom ?? primera.codigo ?? numeroOrden;
+  const ocMostrar = primera.ordenCompra ?? "—";
   const empresa = EMPRESAS.INVERSIONES;
   const totalKg = lineas.reduce((s, l) => s + l.cantidadKg, 0);
   const totalValor = lineas.reduce((s, l) => s + l.valor, 0);
   const vcto = primera.fecha ? sumarDiasDMY(primera.fecha, 1) : "—";
-  const verificada = Boolean(primera.cufe && primera.qrTexto);
   const iva = Math.round(totalValor * 0.05 * 100) / 100; // 5% IVA, misma tasa vista en la factura real
   const subtotal = totalValor + iva;
 
@@ -487,9 +500,7 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
           </tr></table>
         </td>
         <td style="border:none;width:45%;text-align:right;vertical-align:top">
-          ${verificada
-            ? `<div>${qrSvg(primera.qrTexto!)}</div>`
-            : `<div class="chico" style="color:#a33">Sin CUFE/QR — no hay factura Siesa asociada</div>`}
+          ${primera.qrTexto ? `<div>${qrSvg(primera.qrTexto)}</div>` : ""}
           <div class="inv-titulo">FACTURA ELETRONICA</div>
           <div class="inv-numero">${esc(numeroOrden)}</div>
           <div class="chico">Página: 1 de 1</div>
@@ -508,26 +519,29 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
       </tr>
       <tr>
         <td class="lbl">Nit o C.C.:</td><td>${esc(nitMostrar)}</td>
+        <td class="lbl">Fecha Validación Dian:</td><td>${esc(primera.fechaAprobacionDian ?? "—")}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Dirección:</td><td>${esc(direccionMostrar)}</td>
         <td class="lbl">Fecha Factura:</td><td>${esc(primera.fecha ? dmyToYmdSlash(primera.fecha) : "—")}</td>
         <td class="lbl">Fecha de Vcto:</td><td>${esc(vcto)}</td>
       </tr>
       <tr>
-        <td class="lbl">Dirección:</td><td>${esc(direccionMostrar)}</td>
-        <td class="lbl">Orden de Compra</td><td>${esc(primera.codigo ?? "—")}</td>
+        <td class="lbl">Ciudad:</td><td>${esc(primera.ciudad || "—")}</td>
+        <td class="lbl">Orden de Compra</td><td>${esc(ocMostrar)}</td>
         <td class="lbl">Transportador:</td><td>${esc(vehiculo.conductor ?? "—")}</td>
       </tr>
       <tr>
-        <td class="lbl">Ciudad:</td><td>${esc(primera.ciudad || "—")}</td>
+        <td class="lbl">Barrio:</td><td>—</td>
         <td class="lbl">No. Remisión:</td><td>${esc(numeroOrden)}</td>
         <td class="lbl">Carque:</td><td>${esc(vehiculo.placa)}</td>
       </tr>
       <tr>
-        <td class="lbl">Barrio:</td><td>—</td>
-        <td class="lbl">Nro. Pedido</td><td>${esc(primera.codigo ?? numeroOrden)}</td>
         <td class="lbl">Teléfono:</td><td>—</td>
+        <td class="lbl">Nro. Pedido</td><td>${esc(pedidoMostrar)}</td>
       </tr>
     </table>
-    <div class="chico" style="margin:4px 0"><b>CUFE:</b> ${verificada ? esc(primera.cufe) : "No disponible en esta remisión"}</div>
+    <div class="chico" style="margin:4px 0"><b>CUFE:</b> ${esc(primera.cufe ?? "—")}</div>
     <table class="inv-tabla">
       <thead>
         <tr><th style="width:24px">Nro</th><th style="width:44px">REF</th><th>DESCRIPCION</th><th style="width:50px">LOTE</th><th style="width:56px">CANTIDAD</th><th style="width:32px">U.M.</th><th style="width:70px">PRECIO UNIT</th><th style="width:40px">DSCTO</th><th style="width:40px">IPCU</th><th style="width:34px">IVA %</th><th style="width:85px">VALOR TOTAL</th></tr>
@@ -549,13 +563,12 @@ function paginaInversiones(numeroOrden: string, lineas: Orden[], vehiculo: Vehic
     </table>
     <p class="letras"><b>Valor Letras:</b> ${esc(valorEnLetras(subtotal))} *******</p>
     <p class="chico">OBSERVACIONES: —</p>
-    <p class="chico">Autorización Numeración de Facturación — Vigencia de la resolución DIAN vigente.</p>
+    <p class="chico">Autorización Numeración de Facturación No. 18764103027220  Autoriza Rango desde: FESI1 hasta: FESI50000000  Vigencia desde: 2025/12/12 hasta: 2027/12/12 - 24 Meses</p>
     <table class="pie-firmas">
-      <tr><td>Para Pagos y Transferencias, Escanee el código QR:</td><td style="text-align:right">${verificada ? qrSvg(primera.qrTexto!, 72) : ""}</td></tr>
+      <tr><td>Para Pagos y Transferencias, Escanee el código QR:</td><td style="text-align:right"><img src="${empresa.qrPago}" class="inv-qr-pago" alt="QR de pagos"/></td></tr>
     </table>
-    <div class="cufe-box"><b>Firma Digital Electrónica:</b> ${primera.firmaDigital ? esc(primera.firmaDigital) : "no disponible en esta remisión"}</div>
+    <div class="cufe-box"><b>Firma Digital Electrónica:</b> ${esc(primera.firmaDigital ?? "—")}</div>
     <div class="footer-nota" style="text-align:center;margin-top:8px">Factura generada por Software de Sistemas de información empresarial s.a.s NIT 890.319.193-3 PST Siesa e-Invoicing</div>
-    <p class="nota" style="font-size:8px;color:#888;margin-top:8px">Documento de despacho interno generado por SigRoute a partir de la remisión ${esc(numeroOrden)}${verificada ? " (CUFE, QR y firma digital verificados directo con Siesa)" : ""} — no reemplaza la factura electrónica oficial certificada por Siesa/DIAN.</p>
   </div>`;
 }
 
@@ -589,6 +602,8 @@ export function docRemisionesRuta(vehiculo: VehiculoExterno, ordenes: Orden[]): 
     .agro-info { margin: 8px 0; }
     .agro-info .lbl { font-weight: bold; width: 95px; }
     .agro-tabla th, .agro-tabla td { border: 1px solid #333; padding: 3px 5px; font-size: 9.5px; }
+    .agro-impuestos { margin-top: 4px; width: 70%; }
+    .agro-impuestos th, .agro-impuestos td { border: 1px solid #333; padding: 2px 5px; font-size: 9px; }
     .agro-totales { width: 260px; margin-left: auto; margin-top: 6px; }
     .agro-totales td { border: 1px solid #333; padding: 2px 6px; font-size: 9.5px; }
     .agro-totales .lbl { font-weight: bold; background: #f4f6f3; }
@@ -607,6 +622,7 @@ export function docRemisionesRuta(vehiculo: VehiculoExterno, ordenes: Orden[]): 
     .inv-totales .lbl { font-weight: bold; background: #f4f6f3; }
     .inv-impuestos { margin-top: 4px; width: 60%; }
     .inv-impuestos th, .inv-impuestos td { border: 1px solid #333; padding: 2px 5px; font-size: 9px; }
+    .inv-qr-pago { height: 90px; width: 90px; object-fit: contain; }
   </style></head>
   <body onload="setTimeout(function(){window.focus();window.print();},350)">
     ${paginas || '<div class="page"><p>Sin remisiones para imprimir.</p></div>'}

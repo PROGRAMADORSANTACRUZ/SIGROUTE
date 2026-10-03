@@ -295,6 +295,12 @@ export interface Orden {
   clienteFactura?: string | null;
   nitFactura?: string | null;
   direccionFactura?: string | null;
+  // Pedido/orden de compra reales de Siesa (reemplazan el `codigo` NIT-
+  // sucursal interno que antes se mostraba por error como "Pedido" en la
+  // factura impresa) + hora de aprobación DIAN (factura electrónica).
+  pedidoSigcom?: string | null;
+  ordenCompra?: string | null;
+  fechaAprobacionDian?: string | null;
   // Ciudad real del cliente (maestro TAT); Orden.destino en TAT es una clave
   // de agrupacion/asignacion (a veces el mismo codigo del cliente), NO una
   // ciudad -- usar este campo para mostrar ciudad en documentos impresos.
