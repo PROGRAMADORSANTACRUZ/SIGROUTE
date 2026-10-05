@@ -13,6 +13,15 @@ import { IconBox, IconBarChart, IconAlertTriangle, IconCheckCircle, IconTimer, I
 
 const fmtN = (n: number) => n.toLocaleString("es-CO");
 const fmtMoney = (n: number) => n.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+// Compacta para espacios chicos (centro de dona, etc.): 35.6M, 1.2MM (mil millones), 856K — nunca desborda sin importar cuántos ceros tenga.
+function fmtMoneyCompacto(n: number): string {
+  const abs = Math.abs(n);
+  const signo = n < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) return `${signo}$${(abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}MM`;
+  if (abs >= 1_000_000) return `${signo}$${(abs / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (abs >= 1_000) return `${signo}$${(abs / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return `${signo}$${Math.round(abs)}`;
+}
 function fmtMin(n: number): string {
   if (!n) return "0 min";
   if (n >= 60) return `${Math.floor(n / 60)}h ${Math.round(n % 60)}m`;
@@ -58,7 +67,7 @@ function DonutChart({ segments, centerLabel, centerSub }: {
         ))}
         {centerLabel && (
           <>
-            <text x="50" y="47" textAnchor="middle" className="fill-[#14352a]" fontSize="14" fontWeight="bold">{centerLabel}</text>
+            <text x="50" y="47" textAnchor="middle" className="fill-[#14352a]" fontSize={centerLabel.length > 7 ? 10 : centerLabel.length > 5 ? 12 : 14} fontWeight="bold">{centerLabel}</text>
             {centerSub && <text x="50" y="58" textAnchor="middle" className="fill-[#7a8794]" fontSize="6">{centerSub}</text>}
           </>
         )}
@@ -506,7 +515,7 @@ function VistaCostoFlete() {
           <div className="grid grid-cols-2 items-center gap-4 p-4">
             <DonutChart
               segments={rankingRutas.map((r, i) => ({ value: r.costoTotal, color: PALETA[i % PALETA.length], label: r.ruta }))}
-              centerLabel={fmtMoney(totalCosto).replace("COP", "").trim()}
+              centerLabel={fmtMoneyCompacto(totalCosto)}
               centerSub="costo total"
             />
             <Leyenda items={rankingRutas.map((r, i) => ({ label: r.ruta, value: r.costoTotal, color: PALETA[i % PALETA.length], total: totalCosto }))} />
