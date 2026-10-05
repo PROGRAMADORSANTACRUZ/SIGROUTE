@@ -42,6 +42,11 @@ interface OrdenRow {
   codigo?: string | null;
   direccion?: string | null;
   nit?: string | null;
+  // Columna CIUDAD del Excel de Bovino/Porcino (ej. "MALAMBO / ATLANTICO"):
+  // se usa SOLO como pista para restringir el fallback por parecido de nombre
+  // a clientes de la misma ciudad (ver candidatosPorCiudad en /import), nunca
+  // para bloquear la resolución si no coincide con ningún cliente conocido.
+  ciudad?: string | null;
 }
 
 // Destinos que son movimientos de planta, no órdenes: se ignoran al importar.
@@ -110,6 +115,7 @@ function parseOrdenes(buffer: Buffer): OrdenRow[] {
     codigo: header.findIndex((h) => h === "CODIGO" || h.includes("CODIGO")),
     producto: header.findIndex((h) => h.includes("PRODUCTO")),
     cantidad: header.findIndex((h) => h.includes("CANT") && h.includes("KG")),
+    ciudad: header.findIndex((h) => h.includes("CIUDAD")),
   };
 
   const pick = (r: unknown[], i: number) =>
@@ -136,6 +142,7 @@ function parseOrdenes(buffer: Buffer): OrdenRow[] {
       cantidadKg: Number.parseFloat(cantidadStr) || 0,
       codigo: pick(r, col.codigo) || null,
       direccion: pick(r, col.direccion) || null,
+      ciudad: pick(r, col.ciudad) || null,
     });
   }
   return out;
@@ -933,9 +940,16 @@ router.post(
       // cliente (es una referencia de línea/lote, nunca coincide con
       // Cliente.codigoDireccion), así que no puede bloquear la resolución real.
       const clientesGS = await prisma.cliente.findMany({
-        select: { id: true, cliente: true, codigoDireccion: true, direccion: true, consecutivos: true },
+        select: { id: true, cliente: true, nombreDireccion: true, codigoDireccion: true, direccion: true, provincia: true, consecutivos: true },
       });
-      type ClienteMatch = { id: string; cliente: string | null; codigoDireccion: string | null; direccion: string | null };
+      type ClienteMatch = {
+        id: string;
+        cliente: string | null;
+        nombreDireccion: string | null;
+        codigoDireccion: string | null;
+        direccion: string | null;
+        provincia: string | null;
+      };
       const gsPorCodigo = new Map<string, ClienteMatch>();
       const gsPorDestino = new Map<string, ClienteMatch>();
       for (const c of clientesGS) {
@@ -948,6 +962,16 @@ router.post(
           }
         } catch { /* consecutivos inválidos */ }
       }
+      // Nombre a mostrar/comparar para un cliente del maestro. En este
+      // maestro (Distribución) Cliente.cliente guarda el nombre ESPECÍFICO de
+      // la sucursal (ej. "Olimpica 201 Centro", "Megatienda Terminal Santa
+      // Marta" — así quedó cargado y así lo usa el resto de la app: export,
+      // Referencia de Drivin, etc.); Cliente.nombreDireccion es secundario y
+      // en varias cadenas repite solo el nombre genérico de la razón social
+      // (ej. "Olimpica", "Megatiendas"), así que NO sirve para identificar la
+      // sucursal puntual y queda solo de respaldo si "cliente" viniera vacío.
+      const nombreCliente = (c: { cliente: string | null; nombreDireccion: string | null }): string =>
+        (c.cliente && c.cliente.trim()) || (c.nombreDireccion && c.nombreDireccion.trim()) || "";
 
       // Clientes con nombre real, para el fallback por parecido (mín. 50% de
       // palabras en común). Compara contra AMBOS, destino y cliente del Excel,
@@ -955,12 +979,29 @@ router.post(
       // texto genérico repetido ("PRINCIPAL" en casi toda fila) y el dato que
       // sí identifica al cliente real es el nombre del Excel (ej. "MEGATIENDA
       // BAZURTO" ≈ Cliente.cliente "Megatienda Bazurto"), no el destino.
-      const clientesConNombre = clientesGS.filter((c) => c.cliente && c.cliente.trim());
-      function mejorMatchPorNombre(destino: string, clienteExcel: string): (typeof clientesConNombre)[number] | null {
+      const clientesConNombre = clientesGS.filter((c) => nombreCliente(c));
+      // Más estricta: cuando el archivo trae ciudad (columna CIUDAD) y esa
+      // ciudad coincide con la Provincia de AL MENOS un candidato, la
+      // comparación de nombre se restringe a solo esos candidatos (evita que
+      // una sucursal de Santa Marta (p. ej. de una cadena con decenas de
+      // sucursales en todo el país) se empareje por puro parecido de nombre
+      // con una sucursal de la misma cadena en OTRA ciudad).
+      function candidatosPorCiudad(ciudad: string): typeof clientesConNombre {
+        const ciudadKey = claveCliente(ciudad.split("/")[0]);
+        if (!ciudadKey || ciudadKey === "N A" || ciudadKey === "NA") return clientesConNombre;
+        const filtrados = clientesConNombre.filter((c) => {
+          const prov = claveCliente(c.provincia ?? "");
+          return prov && (prov.includes(ciudadKey) || ciudadKey.includes(prov));
+        });
+        return filtrados.length > 0 ? filtrados : clientesConNombre;
+      }
+      function mejorMatchPorNombre(destino: string, clienteExcel: string, ciudad: string): (typeof clientesConNombre)[number] | null {
+        const candidatos = candidatosPorCiudad(ciudad);
         let mejor: (typeof clientesConNombre)[number] | null = null;
         let mejorScore = 0;
-        for (const c of clientesConNombre) {
-          const score = Math.max(similitudNombre(destino, c.cliente), similitudNombre(clienteExcel, c.cliente));
+        for (const c of candidatos) {
+          const nombre = nombreCliente(c);
+          const score = Math.max(similitudNombre(destino, nombre), similitudNombre(clienteExcel, nombre));
           if (score > mejorScore) {
             mejorScore = score;
             mejor = c;
@@ -991,14 +1032,16 @@ router.post(
         if (match) {
           codigo = match.codigoDireccion ?? codigo;
           if (match.direccion) direccion = match.direccion;
-          if (match.cliente) cliente = match.cliente;
+          const nombreMatch = nombreCliente(match);
+          if (nombreMatch) cliente = nombreMatch;
           clienteSistemaId = match.id;
         } else {
-          const mejor = mejorMatchPorNombre(o.destino, o.cliente);
+          const mejor = mejorMatchPorNombre(o.destino, o.cliente, o.ciudad ?? "");
           if (mejor) {
             codigo = mejor.codigoDireccion ?? codigo;
             if (mejor.direccion) direccion = mejor.direccion;
-            if (mejor.cliente) cliente = mejor.cliente;
+            const nombreMejor = nombreCliente(mejor);
+            if (nombreMejor) cliente = nombreMejor;
             clienteSistemaId = mejor.id;
             const consecutivo = `${o.cliente} - ${o.destino}`;
             let set = nuevosConsecutivosPorCliente.get(mejor.id);
