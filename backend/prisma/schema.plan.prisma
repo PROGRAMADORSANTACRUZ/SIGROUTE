@@ -819,6 +819,7 @@ model Orden {
   ciudad    String?
 
   clienteSistemaId String?
+  concatenado      String?
 
   // Datos EXACTOS como vienen de la factura real (Siesa), SIN cruzar con el
   // maestro de Clientes GS/TAT -- requerimiento: la factura/remisión impresa

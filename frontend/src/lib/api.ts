@@ -273,6 +273,7 @@ export interface Orden {
   numeroOrden: string;
   cliente: string;
   destino: string;
+  concatenado?: string | null;
   producto: string;
   // Código Siesa del producto (solo TAT/Inversiones, viene con la factura);
   // null en Bovino/Porcino cargados por Excel.
@@ -533,8 +534,20 @@ export function reenviarOrdenes(
   );
 }
 
-export function syncEstadoDrivin(): Promise<{ actualizados: number; escenarios: number }> {
-  return request<{ actualizados: number; escenarios: number }>(
+export function syncEstadoDrivin(): Promise<{
+  actualizados: number;
+  nivelActualizados: number;
+  pods: number;
+  conteo: Record<string, number>;
+  recibidos: Record<string, { producto: string; recibidoKg: number | null }[]>;
+}> {
+  return request<{
+    actualizados: number;
+    nivelActualizados: number;
+    pods: number;
+    conteo: Record<string, number>;
+    recibidos: Record<string, { producto: string; recibidoKg: number | null }[]>;
+  }>(
     "/api/ordenes/sync-drivin-estado",
     { method: "POST" }
   );

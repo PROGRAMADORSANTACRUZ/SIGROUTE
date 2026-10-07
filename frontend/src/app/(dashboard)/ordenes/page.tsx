@@ -49,6 +49,7 @@ type OrdenGrupo = {
   fecha: string;
   cliente: string;
   destino: string;
+  concatenado: string | null;
   estado: string;
   reenviado: boolean;
   reenviadoAt: string | null;
@@ -79,6 +80,7 @@ function agrupar(ordenes: Orden[]): OrdenGrupo[] {
         fecha: o.fecha,
         cliente: o.cliente,
         destino: o.destino,
+        concatenado: o.concatenado ?? null,
         estado: o.estado,
         reenviado: false,
         reenviadoAt: null,
@@ -1048,7 +1050,7 @@ export default function OrdenesPage() {
                           <th className="px-4 py-3 font-semibold">#</th>
                           <th className="px-4 py-3 font-semibold">Fecha</th>
                           <th className="px-4 py-3 font-semibold">No. Orden</th>
-                          <th className="px-4 py-3 font-semibold">Consecutivo</th>
+                          <th className="px-4 py-3 font-semibold">Concatenado</th>
                           <th className="px-4 py-3 font-semibold">Código</th>
                           <th className="px-4 py-3 font-semibold">Cliente</th>
                           <th className="px-4 py-3 font-semibold">Destino</th>
@@ -1116,7 +1118,7 @@ export default function OrdenesPage() {
                           ) : (
                             <>
                               <td className="whitespace-nowrap px-4 py-3 text-[#45505e]">
-                                {`${g.clienteAsignado ?? g.cliente} - ${g.destino}`}
+                                {g.concatenado || `${g.cliente} - ${g.destino}`}
                               </td>
                               <td className="px-4 py-3">
                                 {codigo ? (

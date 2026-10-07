@@ -616,14 +616,19 @@ function similitudDireccion(a: unknown, b: unknown): number {
   return score;
 }
 
-// Similitud NORMALIZADA (0..1, Jaccard sobre palabras >=3 letras) entre el
-// destino de una orden y el nombre real de un cliente. Se usa para auto-asignar
-// el cliente correcto en el import cuando no hay código ni consecutivo ya
-// registrado (ver mejorMatchPorNombre en /import).
-const UMBRAL_SIMILITUD_NOMBRE = 0.5;
+// Similitud NORMALIZADA (0..1, Jaccard sobre TODAS las palabras, sin filtrar
+// las cortas) entre el destino de una orden y el nombre real de un cliente.
+// Se usa para auto-asignar el cliente correcto en el import cuando no hay
+// código ni consecutivo ya registrado (ver mejorMatchPorNombre en /import).
+// Exige CASI coincidencia exacta (0.92): un cliente "Pdv Alameda I" y otro
+// "Pdv Alameda II" deben seguir sin auto-asignarse por puro parecido — ver el
+// chequeo de ambigüedad en mejorMatchPorNombre, que es la defensa real para
+// ese caso (aquí NO se filtran palabras cortas a propósito: el numeral/
+// romano que diferencia ambos SÍ debe contar en el puntaje).
+const UMBRAL_SIMILITUD_NOMBRE = 0.92;
 function similitudNombre(a: unknown, b: unknown): number {
-  const ta = new Set(claveCliente(a).split(" ").filter((t) => t.length >= 3));
-  const tb = new Set(claveCliente(b).split(" ").filter((t) => t.length >= 3));
+  const ta = new Set(claveCliente(a).split(" ").filter(Boolean));
+  const tb = new Set(claveCliente(b).split(" ").filter(Boolean));
   if (ta.size === 0 || tb.size === 0) return 0;
   let inter = 0;
   for (const t of ta) if (tb.has(t)) inter++;
@@ -999,15 +1004,24 @@ router.post(
         const candidatos = candidatosPorCiudad(ciudad);
         let mejor: (typeof clientesConNombre)[number] | null = null;
         let mejorScore = 0;
+        let segundoScore = 0;
         for (const c of candidatos) {
           const nombre = nombreCliente(c);
           const score = Math.max(similitudNombre(destino, nombre), similitudNombre(clienteExcel, nombre));
           if (score > mejorScore) {
+            segundoScore = mejorScore;
             mejorScore = score;
             mejor = c;
+          } else if (score > segundoScore) {
+            segundoScore = score;
           }
         }
-        return mejorScore >= UMBRAL_SIMILITUD_NOMBRE ? mejor : null;
+        if (mejorScore < UMBRAL_SIMILITUD_NOMBRE) return null;
+        // Ambiguo (ej. "Pdv Alameda I" y "Pdv Alameda II" puntúan casi igual
+        // contra el mismo destino genérico): mejor dejarla "No Creado" que
+        // adivinar — el usuario asigna el concatenado o crea el cliente a mano.
+        if (segundoScore >= mejorScore - 0.05) return null;
+        return mejor;
       }
       // Consecutivos nuevos a guardar en Cliente ("cliente - destino" tal cual
       // viene en el archivo), para que la próxima vez que llegue ese mismo
@@ -1018,6 +1032,7 @@ router.post(
         let codigo = o.codigo;
         let direccion = o.direccion;
         let cliente = o.cliente;
+        const concatenado = `${o.cliente} - ${o.destino}`;
         let clienteSistemaId: string | null = null;
 
         // El consecutivo se guarda como "cliente - destino" (ver
@@ -1053,7 +1068,7 @@ router.post(
           }
         }
         const sinResolver = !clienteSistemaId;
-        return { ...o, numeroOrden: tipo + o.numeroOrden, codigo, direccion, cliente, clienteSistemaId, sinResolver };
+        return { ...o, numeroOrden: tipo + o.numeroOrden, codigo, direccion, cliente, concatenado, clienteSistemaId, sinResolver };
       });
       if (ordenesConCodigo.length === 0) {
         throw new HttpError(400, "El archivo no contiene órdenes válidas");
@@ -2089,10 +2104,20 @@ router.post("/sync-drivin-estado", requireAuth, requirePermiso("distrilog.nivel_
           customer_comment?: string;
           scenario_token?: string;
           client_name?: string;
+          items?: { description?: string; delivered_units?: number | null }[];
         };
       }[];
     };
     const pods = podData.data ?? [];
+    const recibidos: Record<string, { producto: string; recibidoKg: number | null }[]> = {};
+    for (const pod of pods) {
+      const a = pod.attributes;
+      if (!a?.code) continue;
+      recibidos[norm(a.code)] = (a.items ?? []).map((item) => ({
+        producto: item.description ?? "",
+        recibidoKg: typeof item.delivered_units === "number" ? item.delivered_units : null,
+      }));
+    }
 
     // Traduce el status de la POD de Drivin al estado de la orden y del nivel de
     // servicio (novedad). approved = entregado OK; partial = entrega parcial;
@@ -2275,7 +2300,7 @@ router.post("/sync-drivin-estado", requireAuth, requirePermiso("distrilog.nivel_
       await prisma.novedad.createMany({ data: nuevasNovedades });
     }
 
-    res.json({ actualizados, nivelActualizados, pods: pods.length, conteo });
+    res.json({ actualizados, nivelActualizados, pods: pods.length, conteo, recibidos });
   } catch (err) {
     next(err);
   }
