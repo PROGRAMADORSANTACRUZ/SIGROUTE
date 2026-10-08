@@ -32,6 +32,8 @@ const envSchema = z.object({
   // Token de la API pública de despacho de SIGCOM (DISPATCH_API_TOKEN). Se envía
   // en el header x-api-key; sin él la API responde 401.
   TAT_INVOICES_TOKEN: z.string().optional(),
+  // Token exclusivo del GET de planificación para integración externa.
+  PLANIFICACION_CONTROL_CARGA_TOKEN: z.string().optional(),
   // Consulta directa a apiconsulta (Siesa) por factura: reemplaza el intermediario
   // SIGCOM. Se consulta con ?cia=&fecha_inicio=&fecha_fin=&documento=&token=
   // (el token es el mismo CLIENTES_TAT_TOKEN de apiconsulta).

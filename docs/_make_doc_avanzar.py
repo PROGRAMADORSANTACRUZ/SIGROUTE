@@ -297,12 +297,98 @@ parrafo(
     "mapear estos campos al formato que su software requiera para recibir la informacion."
 )
 
-# ───────────────────────── 6. Siguientes pasos ─────────────────────────
-subtitulo("6.", "Siguientes pasos sugeridos")
-bullet("Confirmar el formato o interfaz exacta de envio: campos obligatorios y catalogos propios (ciudades, rutas) que su software espere.")
-bullet("Definir si el envio es por viaje, en el momento en que cada vehiculo sale, o por lote consolidado al final del dia.")
-bullet("Acordar el momento del envio: al remitir al operador de distribucion es el punto natural, porque ya confirma vehiculo y carga real.")
-bullet("Validar con un conjunto reducido de viajes reales antes de activar el envio automatico y recurrente.")
+# ───────────────────────── 6. API de Planificacion ─────────────────────────
+subtitulo("6.", "Consulta de Planificacion por API")
+parrafo(
+    "Su software consulta directamente la planificacion vigente de SIGROUTE mediante una peticion "
+    "HTTP GET. La respuesta se lee de la base de datos en cada solicitud; no es un archivo ni una "
+    "copia programada. Si no se indica fecha, consulta el dia actual en la zona horaria de Bogota."
+)
+parrafo("Endpoint completo para produccion:", bold=True, space_after=3)
+parrafo(
+    "https://sigroute.grupo-santacruz.com/api/integraciones/control-carga/planificacion?token="
+    "4b714fd07f52eb7721d3febfd728f3d07e08f467e1379aa89a23f89e88120f02",
+    color=VERDE_ACENTO, tam=9.5, space_after=8,
+)
+parrafo("Para consultar otra fecha, agregue el parametro fecha=YYYY-MM-DD:", space_after=3)
+parrafo(
+    "https://sigroute.grupo-santacruz.com/api/integraciones/control-carga/planificacion?token="
+    "4b714fd07f52eb7721d3febfd728f3d07e08f467e1379aa89a23f89e88120f02&fecha=2026-10-08",
+    color=VERDE_ACENTO, tam=9.5,
+)
+parrafo(
+    "El ejemplo de fecha es ilustrativo; reemplacelo por el dia solicitado. La fecha es opcional "
+    "y debe enviarse en formato YYYY-MM-DD.",
+    color=GRIS, tam=9.5,
+)
+parrafo("Autenticacion y respuestas HTTP", bold=True, space_after=3)
+tabla_campos([
+    ("Token", "Es exclusivo de este endpoint. Debe conservarse como secreto y no compartirse en codigo fuente, repositorios publicos ni registros del cliente."),
+    ("200", "Consulta correcta. Incluye la planificacion, rutas, vehiculos, destinos locales, categorias y valor del flete."),
+    ("400", "La fecha no tiene el formato YYYY-MM-DD."),
+    ("401", "Token ausente o no valido."),
+    ("404", "No existe una planificacion para la fecha consultada."),
+    ("503", "El token de integracion aun no esta configurado en el servidor."),
+])
+parrafo("Campos principales de la respuesta", bold=True, space_after=3)
+tabla_campos([
+    ("planificacion.fecha / consecutivo / estado", "Dia operativo, numero consecutivo y estado de la planificacion."),
+    ("rutas[].placa / nombreRuta / numeroRuta", "Vehiculo asignado y nombre/consecutivo de ruta. placa es null si aun no se ha asignado vehiculo."),
+    ("rutas[].conductor / horaCargue", "Conductor y hora de cargue registrados en Planificacion."),
+    ("Rutas[].kilosTotales / valorFlete", "Kilos planificados agregados de la ruta y flete calculado segun la tarifa vigente. El flete es null si faltan ruta/capacidad o tarifa."),
+    ("Destinos[].clienteId / cliente", "Identificador y nombre del cliente del maestro local SIGROUTE. cliente/destino pueden ser null si el identificador historico ya no existe en el maestro actual."),
+    ("Destinos[].destino / direccion / ciudad", "Sucursal/destino, direccion y ciudad del maestro local; pueden ser null si no existe una referencia vigente."),
+    ("destinos[].cargas[]", "Desglose por tipo: bovino, porcino, embutido, TAT u otros; incluye kilos programados, canastillas y kilos totales."),
+    ("destinosSinRuta[]", "Clientes con carga planificada que todavia no han sido asignados a una ruta/vehiculo."),
+    ("areas[]", "Estado de cierre y fecha/hora de cada area de cargue."),
+])
+parrafo(
+    "La categoria de planificacion Inversiones se entrega como tipo embutido y conserva "
+    "categoriaPlanificacion=inversiones para rastrear el nombre exacto guardado en SIGROUTE. "
+    "Viscera Bovino y Viscera Porcino se identifican en categoriaPlanificacion y mantienen "
+    "el tipo general bovino o porcino. Los kilos totales incluyen kilos programados mas "
+    "canastillas convertidas con el factor configurado en SIGROUTE (1,9 kg por canastilla). "
+    "El valorFlete aparece una sola vez por ruta, no se debe sumar una vez por destino. "
+    "Los kilos se redondean a dos decimales. Si un cliente historico fue eliminado del maestro, "
+    "SIGROUTE conserva su identificador planificado pero no inventa nombre/direccion; esos "
+    "campos se devuelven como null.",
+)
+parrafo("Formato resumido de respuesta", bold=True, space_after=3)
+parrafo(
+    '{ "sistema": "SIGROUTE", "version": 1, "planificacion": { "fecha": "YYYY-MM-DD", '
+    '"rutas": [{ "placa": "...", "valorFlete": 0, "destinos": [{ "cliente": "...", '
+    '"destino": "...", "cargas": [{ "tipo": "bovino", "kilosTotales": 0 }] }] }], '
+    '"destinosSinRuta": [] } }',
+    tam=9, color=VERDE,
+)
+
+# ───────────────────────── 7. Configuracion del token ─────────────────────────
+subtitulo("7.", "Configuracion y seguridad")
+parrafo(
+    "Antes de habilitar la consulta en produccion, registrar en las variables de entorno de "
+    "Dokploy la clave PLANIFICACION_CONTROL_CARGA_TOKEN con exactamente este valor:",
+)
+parrafo(
+    "4b714fd07f52eb7721d3febfd728f3d07e08f467e1379aa89a23f89e88120f02",
+    color=VERDE_ACENTO, tam=10,
+)
+bullet("El token solo autoriza este GET y no concede acceso a otros endpoints ni permite modificar informacion.")
+bullet("El receptor debe guardarlo en un gestor de secretos y limitar su distribucion a la persona/sistema autorizado.")
+bullet("La respuesta no se cachea. Cada peticion refleja los datos guardados en SIGROUTE al momento de la consulta.")
+bullet("El endpoint informa valorFlete=null cuando no hay ruta reconocida o capacidad del vehiculo; SIGROUTE no inventa un precio.")
+
+# ───────────────────────── 8. Ejecucion y alcance ─────────────────────────
+subtitulo("8.", "Ejecucion y alcance")
+parrafo(
+    "Esta primera integracion publica Planificacion: kilos por cliente/categoria, rutas, "
+    "placas, destinos del maestro local y flete. No equivale a confirmar que la carga salio "
+    "ni reemplaza los datos reales de Ejecucion descritos anteriormente."
+)
+parrafo(
+    "Si el software necesita despues un manifiesto de carga real —por ejemplo conductor/documento, "
+    "peso efectivamente despachado o marca de salida— se debe acordar esa ampliacion y su momento "
+    "de confirmacion; esos valores no se deben interpretar como planificados."
+)
 
 doc.save(r"c:\Users\molin\OneDrive\Desktop\SANTA CRUZ PROJECTS\suite-santacruz\SIGROUTE\docs\SIGROUTE_Integracion_Control_de_Carga.docx")
 print("OK")
